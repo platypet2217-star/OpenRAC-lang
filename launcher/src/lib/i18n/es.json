@@ -1,0 +1,12 @@
+{
+    "settings": {
+        "languageLabel": "Idioma",
+        "languageDesc": "Elige el idioma de la aplicación."
+    },
+    "folderPrompt": {
+        "androidTitle": "Añade tu disco de Ratchet & Clank",
+        "androidDesc": "Elige la imagen de tu propio disco (.iso o .chd) desde el almacenamiento de este dispositivo. Se copiará en la aplicación (unos pocos GB) y el juego se configurará desde ahí. OpenRAC nunca descarga un juego.",
+    "pcTitle": "¿Dónde están tus juegos de PlayStation 2?",
+    "pcDesc": "Elige la carpeta con las imágenes de tus discos (.iso). OpenRAC buscará los juegos de Ratchet & Clank en ella y los configurará. No se copia nada fuera de tu ordenador y OpenRAC nunca descarga un juego."
+  }
+}

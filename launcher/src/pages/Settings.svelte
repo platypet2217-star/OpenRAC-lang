@@ -207,6 +207,21 @@
     saving = false;
     if (finish) app.page = "library";
   }
+
+   // Importamos el store del idioma para poder cambiar su valor
+  import { locale, t } from '../lib/i18n/i18n'; 
+  
+  // Aquí estará la variable local vinculada al selector
+  let selectedLanguage = $state($locale);
+
+  // Función que se ejecuta cuando el usuario cambia la opción
+  function handleLanguageChange(event) {
+    const newLang = event.target.value;
+    locale.set(newLang); // Actualiza todo el launcher al instante
+    
+    // TODO: Aquí llamarás a la función que guarda la configuración en el backend (Rust/C++)
+    // Ejemplo ficticio basado en Tauri: invoke('save_language_setting', { lang: newLang });
+  }
 </script>
 
 <div class="page">
@@ -425,6 +440,16 @@
             <small>Your status says when you are playing.</small>
           </span>
           <input type="checkbox" role="switch" class="switch" bind:checked={draft.discordRpc} />
+        </label>
+        <label class="setting">
+          <span class="text">
+  <strong>{$t.settings?.languageLabel}</strong>
+  <small>{$t.settings?.languageDesc}</small>
+</span>
+          <select class="form-control" bind:value={selectedLanguage} onchange={handleLanguageChange}>
+  <option value="en">English</option>
+  <option value="es">Español</option>
+</select>
         </label>
       {/if}
       <!-- The name online mods show the other players; the game gets it as OPENRAC_PLAYER_NAME. -->

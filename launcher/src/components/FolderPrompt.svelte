@@ -5,6 +5,7 @@
   import { app } from "$lib/app.svelte";
   import { chooseGamesFolder } from "$lib/player.svelte";
   import Icon from "./Icon.svelte";
+  import { t } from '../lib/i18n/i18n';
 
   /** On a game's page its Play band holds the one main button, so the folder's is a plain one. */
   let { primary = true }: { primary?: boolean } = $props();
@@ -26,22 +27,19 @@
     <Icon name="folder" size={22} />
     <div class="grow">
       {#if onAndroid}
-        <h2>Add your Ratchet &amp; Clank disc</h2>
+        <h2>{t().folderPrompt.androidTitle}</h2>
         <p class="muted">
-          Choose the image of your own disc (.iso or .chd) from this device's storage. It is copied into the app, a few
-          GB, and the game is set up from it. OpenRAC never downloads a game.
+          {t().folderPrompt.androidDesc}
         </p>
       {:else if askFolder}
-        <h2>Where are your PlayStation 2 games?</h2>
+        <h2>{t().folderPrompt.pcTitle}</h2>
         <p class="muted">
-          Choose the folder with your disc images (.iso). OpenRAC finds the Ratchet &amp; Clank games in it and sets
-          them up. Nothing is copied off your computer, and OpenRAC never downloads a game.
+          {t().folderPrompt.pcDesc}
         </p>
       {:else}
-        <h2>No Ratchet &amp; Clank game found there</h2>
+        <h2>{t().folderPrompt.emptyFolderTitle}</h2>
         <p class="muted">
-          <span class="mono">{app.config?.discsDir}</span> holds no disc image (.iso) of a game OpenRAC knows. Choose another
-          folder, or set this game up and pick its image yourself.
+          {t().folderPrompt.emptyFolderDesc}
         </p>
       {/if}
     </div>
