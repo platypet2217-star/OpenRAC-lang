@@ -1,14 +1,27 @@
-import { writable, derived } from 'svelte/store';
 import en from './en.json';
 import es from './es.json';
 
-// Diccionario que junta todos los idiomas
-const translations: Record<string, typeof en> = { en, es };
+const translations: Record<string, any> = { en, es };
 
-// Store para guardar el idioma actual (por defecto inglés)
-export const locale = writable('en');
+let _locale = 'en';
+let _listeners: (() => void)[] = [];
 
-// Store derivada que devuelve los textos del idioma activo
-export const t = derived(locale, ($locale) => {
-  return translations[$locale] || translations['en']; 
-});
+// CAMBIA "pub" POR "export" AQUÍ:
+export const i18n = {
+  get currentLocale() {
+    return _locale;
+  },
+  set currentLocale(lang: string) {
+    _locale = lang;
+    _listeners.forEach(ctx => ctx());
+  },
+  get t() {
+    return translations[_locale] || translations['en'];
+  },
+  _subscribe(cb: () => void) {
+    _listeners.push(cb);
+    return () => {
+      _listeners = _listeners.filter(ctx => ctx !== cb);
+    };
+  }
+};

@@ -5,7 +5,7 @@
   import { app } from "$lib/app.svelte";
   import { chooseGamesFolder } from "$lib/player.svelte";
   import Icon from "./Icon.svelte";
-  import { t } from '../lib/i18n/i18n';
+  import { i18n } from '../lib/i18n/i18n';
 
   /** On a game's page its Play band holds the one main button, so the folder's is a plain one. */
   let { primary = true }: { primary?: boolean } = $props();
@@ -27,19 +27,19 @@
     <Icon name="folder" size={22} />
     <div class="grow">
       {#if onAndroid}
-        <h2>{$t.folderPrompt?.androidTitle}</h2>
+        <h2>{i18n.t.folderPrompt?.androidTitle}</h2>
         <p class="muted">
-          {$t.folderPrompt?.androidDesc}
+          {i18n.t.folderPrompt?.androidDesc}
         </p>
       {:else if askFolder}
-        <h2>{$t.folderPrompt?.pcTitle}</h2>
+        <h2>{i18n.t.folderPrompt?.pcTitle}</h2>
         <p class="muted">
-          {$t.folderPrompt?.pcDesc}
+          {i18n.t.folderPrompt?.pcDesc}
         </p>
       {:else}
-        <h2>{$t.folderPrompt?.emptyFolderTitle}</h2>
+        <h2>{i18n.t.folderPrompt?.emptyFolderTitle}</h2>
         <p class="muted">
-          {$t.folderPrompt?.emptyFolderDesc}
+          {i18n.t.folderPrompt?.emptyFolderDesc}
         </p>
       {/if}
     </div>
@@ -47,7 +47,7 @@
       {#if looking}<span class="spinner"></span>{/if}{onAndroid
         ? "Choose disc image"
         : askFolder
-          ? "Choose folder"
+          ? i18n.t.folderPrompt?.chooseFolder
           : "Choose another"}
     </button>
   </section>

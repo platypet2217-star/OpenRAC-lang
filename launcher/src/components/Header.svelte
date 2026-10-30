@@ -9,7 +9,16 @@
   import { untrack } from "svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import Logo from "./Logo.svelte";
-  import { t } from '../lib/i18n/i18n';
+  import { i18n } from '../lib/i18n/i18n';
+
+  let languageTrigger = $state(0);
+
+  // 2. Nos suscribimos a los cambios de idioma para activar el trigger
+  $effect(() => {
+    return i18n._subscribe(() => {
+      languageTrigger += 1; // Suma 1 y despierta la reactividad de Svelte 5
+    });
+  });
 
   /** The first run: the bar with the name only, nothing to go to yet. */
   /** `shown`: the page on screen, which follows app.page inside a page's slide (App.svelte), so that
@@ -19,15 +28,20 @@
   // A player has three places to be: the games, modding and the settings. What the launcher
   // ran (Activity) opens from the running job here and from a game's menu. With
   // developer tools on, Develop is a tab of its own: the checkout, each version and the jobs.
-  const tabs = $derived<{ page: Page; label: string; icon: IconName }[]>([
-    { page: "library", label: $t.header?.pageGames, icon: "library" },
-    // Every launcher, installed or on a checkout (an installed one mods in its data folder,
-    // tools/bundle_standalone.py). Android's has the mods, Enhanced graphics and the packs, without
-    // the level editor (no Godot there: Mods.svelte).
-    { page: "mods", label: $t.header?.pageMods, icon: "edit" },
-    ...(app.config?.developer ? [{ page: "develop" as Page, label: $t.header?.pageDevelop, icon: "terminal" as IconName }] : []),
-    { page: "settings", label: $t.header?.pageSettings, icon: "gear" },
-  ]);
+  const tabs = $derived.by<{ page: Page; label: string; icon: IconName }[]>(() => {
+    // Leemos el trigger aquí dentro. Al cambiar su valor, Svelte reconstruye toda la lista
+    languageTrigger; 
+
+    return [
+      { page: "library", label: i18n.t.header?.pageGames, icon: "library" },
+      // Every launcher, installed or on a checkout (an installed one mods in its data folder,
+      // tools/bundle_standalone.py). Android's has the mods, Enhanced graphics and the packs, without
+      // the level editor (no Godot there: Mods.svelte).
+      { page: "mods", label: i18n.t.header?.pageMods, icon: "edit" },
+      ...(app.config?.developer ? [{ page: "develop" as Page, label: i18n.t.header?.pageDevelop, icon: "terminal" as IconName }] : []),
+      { page: "settings", label: i18n.t.header?.pageSettings, icon: "gear" },
+    ];
+  });
 
   const running = $derived(runningJob());
   const pending = $derived(pendingJobs());

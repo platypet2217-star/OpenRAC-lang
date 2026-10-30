@@ -24,6 +24,7 @@ import { choiceFor, pickVersion } from "./discChoice";
 import { phaseLabel } from "./progress";
 import { PLAY_ACTIONS } from "./reports";
 import type { Job } from "./queue";
+import { i18n } from '../lib/i18n/i18n';
 
 export type PlayerKind =
   | "installing" // the disc is being read
@@ -196,15 +197,15 @@ export function playerState(game: GameView, v: VersionView): PlayerState {
     return {
       ...base,
       kind: "set-up",
-      label: found ? "Set up" : "Set up from your disc",
+      label: found ? i18n.t.player?.setUp : i18n.t.player?.setUpDisc,
       icon: "disc",
       hint: planned
         ? "This game cannot be played yet. You can set your disc up now, ready for when it can."
         : found
           ? `Found in your games folder: ${fileName(found.path)}`
-          : "Choose the image (.iso or .chd) of your own disc. OpenRAC never downloads a game.",
+          : i18n.t.player?.setUpDiscDesc,
       primary: !planned,
-      status: planned ? "Not playable yet" : "Not set up",
+      status: planned ? i18n.t.player?.notPlayableYet : i18n.t.player?.notSetUp,
       tone: planned ? "info" : "warn",
     };
   }
@@ -212,11 +213,11 @@ export function playerState(game: GameView, v: VersionView): PlayerState {
     return {
       ...base,
       kind: "unavailable",
-      label: "Not playable yet",
+      label: i18n.t.player?.notPlayableYet,
       icon: "play",
       hint: "Your disc is set up. This game's PC port is not ready yet.",
       disabled: true,
-      status: "Not playable yet",
+      status: i18n.t.player?.notPlayableYet,
       tone: "info",
     };
   }

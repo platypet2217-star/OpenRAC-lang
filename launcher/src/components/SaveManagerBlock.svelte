@@ -13,6 +13,7 @@
   import { fold } from "$lib/motion";
   import { tick } from "svelte";
   import { slide } from "svelte/transition";
+  import { i18n } from '../lib/i18n/i18n';
 
   let { version }: { version: VersionView } = $props();
 
@@ -128,20 +129,20 @@
 
 <section class="panel saves" aria-label="Saves">
   <div class="row top">
-    <h2 class="grow">Saves</h2>
+    <h2 class="grow">{i18n.t.saveManager?.saves}</h2>
     {#if developer && status?.exists}
       <span class="chip mono" title="The memory card's folder">{status.gameFolderName ?? version.serial}</span>
       <button class="ghost small" onclick={loadStatus} disabled={loading} title="Read the memory card again">
         {#if loading}<span class="spinner"></span>{:else}<Icon name="refresh" size={14} />{/if}Refresh
       </button>
     {/if}
-    <button class="ghost small" onclick={openFolder}><Icon name="folder" size={14} />Open folder</button>
+    <button class="ghost small" onclick={openFolder}><Icon name="folder" size={14} />{i18n.t.saveManager?.openFolder}</button>
   </div>
 
   {#if loading && !status}
     <p class="muted row"><span class="spinner"></span>Reading the memory card…</p>
   {:else if status && !status.exists}
-    <p class="muted">Your saves show here once you have played and saved.</p>
+    <p class="muted">{i18n.t.saveManager?.savesDesc}</p>
   {:else if status}
     {#if used.length}
       <ul class="slots">

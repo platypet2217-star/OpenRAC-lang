@@ -24,6 +24,7 @@
   import { applyPalette, PALETTES } from "$lib/palettes";
   import { devBranches } from "$lib/updates";
   import { tablist } from "$lib/tabs";
+  import { i18n } from '../lib/i18n/i18n';
 
   let { setup = false }: { setup?: boolean } = $props();
 
@@ -208,20 +209,14 @@
     if (finish) app.page = "library";
   }
 
-   // Importamos el store del idioma para poder cambiar su valor
-  import { locale, t } from '../lib/i18n/i18n'; 
-  
-  // Aquí estará la variable local vinculada al selector
-  let selectedLanguage = $state($locale);
+  let updateTrigger = $state(0);
 
-  // Función que se ejecuta cuando el usuario cambia la opción
-  function handleLanguageChange(event) {
-    const newLang = event.target.value;
-    locale.set(newLang); // Actualiza todo el launcher al instante
-    
-    // TODO: Aquí llamarás a la función que guarda la configuración en el backend (Rust/C++)
-    // Ejemplo ficticio basado en Tauri: invoke('save_language_setting', { lang: newLang });
-  }
+  // Nos acoplamos a los cambios del objeto i18n externo
+  $effect(() => {
+    return i18n._subscribe(() => {
+      updateTrigger += 1; // Incrementa el trigger para redibujar la vista al cambiar de idioma
+    });
+  });
 </script>
 
 <div class="page">
@@ -443,12 +438,17 @@
         </label>
         <label class="setting">
           <div class="settings-row">
+          {#key updateTrigger}
             <span class="text">
-              <strong>{$t.settings?.languageLabel}</strong>
-              <small>{$t.settings?.languageDesc}</small>
+              <strong>{i18n.t.settings?.languageLabel}</strong>
+              <small>{i18n.t.settings?.languageDesc}</small>
             </span>
+          {/key}
             <div class="select-container">
-              <select class="form-control dropdown-select" bind:value={selectedLanguage} onchange={handleLanguageChange}>
+              <select class="form-control dropdown-select" 
+              value={i18n.currentLocale} 
+              onchange={(e) => i18n.currentLocale = e.target.value}
+              >
                 <option value="en">English</option>
                 <option value="es">Español</option>
               </select>

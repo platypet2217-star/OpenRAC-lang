@@ -50,6 +50,7 @@
     rebuildSteps,
   } from "$lib/player.svelte";
   import { themeStyle } from "$lib/themes";
+  import { i18n } from '../lib/i18n/i18n';
 
   // One game, whatever the region: the page plays the version your disc is (playerVersion),
   // always. Each disc's decompilation and actions are in the Develop tab.
@@ -216,7 +217,7 @@
     }
     if (extract && extract.state !== "planned" && !onAndroid) {
       // Android has no Godot: its Mods tab has the mods and packs, not the level editor.
-      items.push({ label: "Edit its levels (Mods)", icon: "edit", run: () => (app.page = "mods") });
+      items.push({ label: i18n.t.folderPrompt?.editItsLevels, icon: "edit", run: () => (app.page = "mods") });
     }
     if (setUp) {
       items.push({
@@ -233,8 +234,8 @@
       items.push({ label: "Import saves from PCSX2", icon: "save", run: () => void importPcsx2(serial) });
     }
     if (!onAndroid) {
-      items.push({ label: "Open the game's folder", icon: "folder", run: () => void guard(api.openPath(dir)) });
-      items.push({ label: "Activity log", icon: "terminal", run: () => (app.page = "tasks") });
+      items.push({ label: i18n.t.folderPrompt?.openGameFolder, icon: "folder", run: () => void guard(api.openPath(dir)) });
+      items.push({ label: i18n.t.folderPrompt?.activityLog, icon: "terminal", run: () => (app.page = "tasks") });
     }
     if (setUp) items.push({ label: "Remove the set-up", icon: "trash", danger: true, run: () => void removeSetUp() });
     return items;
@@ -354,10 +355,10 @@
 
           {#if showSteps}
             <ol class="steps" aria-label="Setting the game up">
-              <li class:done={!!setUp}>Disc set up</li>
+              <li class:done={!!setUp}>{i18n.t.player?.discSetUp}</li>
               {#if next.kind !== "unavailable" && (next.kind !== "set-up" || next.primary)}
-                <li class:done={built}>Game built</li>
-                {#if levels}<li class:done={levelsReady}>Levels ready</li>{/if}
+                <li class:done={built}>{i18n.t.player?.gameBuilt}</li>
+                {#if levels}<li class:done={levelsReady}>{i18n.t.player?.levelsReady}</li>{/if}
               {/if}
             </ol>
           {/if}
