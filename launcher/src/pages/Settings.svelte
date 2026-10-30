@@ -442,14 +442,20 @@
           <input type="checkbox" role="switch" class="switch" bind:checked={draft.discordRpc} />
         </label>
         <label class="setting">
-          <span class="text">
-  <strong>{$t.settings?.languageLabel}</strong>
-  <small>{$t.settings?.languageDesc}</small>
-</span>
-          <select class="form-control" bind:value={selectedLanguage} onchange={handleLanguageChange}>
-  <option value="en">English</option>
-  <option value="es">Español</option>
-</select>
+          <div class="settings-row">
+            <span class="text">
+              <strong>{$t.settings?.languageLabel}</strong>
+              <small>{$t.settings?.languageDesc}</small>
+            </span>
+            <div class="select-container">
+              <select class="form-control dropdown-select" bind:value={selectedLanguage} onchange={handleLanguageChange}>
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+              <!-- Esto añade la flecha personalizada si el diseño del proyecto lo requiere -->
+               <span class="select-arrow"></span>
+              </div>
+            </div>
         </label>
       {/if}
       <!-- The name online mods show the other players; the game gets it as OPENRAC_PLAYER_NAME. -->
@@ -922,4 +928,83 @@
       transform: translate(-50%, 24px);
     }
   }
+
+  /* Contenedor para posicionar la flecha personalizada si es necesario */
+.select-container {
+  position: relative;
+  min-width: 200px;
+}
+
+/* Estilo del recuadro principal (Botonera oscura con bordes redondeados) */
+.dropdown-select {
+  width: 100%;
+  appearance: none; /* Elimina la flecha por defecto de Windows/Chrome */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  
+  background-color: #161920; /* Fondo oscuro integrado con la interfaz */
+  color: #e2e8f0; /* Color de texto claro */
+  padding: 0.6rem 2.5rem 0.6rem 1.2rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border: 2px solid #2d3139; /* Borde sutil por defecto */
+  border-radius: 9999px; /* Bordes completamente redondeados como el FSR */
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Efecto Hover (Al pasar el mouse por encima) */
+.dropdown-select:hover {
+  border-color: #4a5262;
+}
+
+/* Efecto Focus (Cuando está seleccionado/abierto, imita el borde naranja del FSR) */
+.dropdown-select:focus {
+  outline: none;
+  border-color: #ff9900; /* Color naranja característico de la selección activa */
+  box-shadow: 0 0 0 3px rgba(255, 153, 0, 0.15);
+}
+
+/* Diseño de las opciones internas del menú */
+.dropdown-select option {
+  background-color: #1a1d24; /* Fondo del menú desplegable */
+  color: #e2e8f0;
+  padding: 10px;
+}
+
+/* Flecha personalizada al lado derecho del selector */
+.select-arrow {
+  position: absolute;
+  top: 50%;
+  right: 1.2rem;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #a0aec0; /* Color de la flecha hacia abajo */
+  pointer-events: none; /* Permite hacer clic a través de la flecha */
+}
+
+/* Cambia el color de la flecha cuando el selector está activo */
+.dropdown-select:focus + .select-arrow {
+  border-top-color: #ff9900;
+}
+
+/* 1. El contenedor principal de esta fila de configuración */
+.settings-row {
+  display: flex;
+  justify-content: space-between; /* Empuja el texto a la izquierda y el selector a la derecha */
+  align-items: center;            /* Centra verticalmente ambos elementos */
+  width: 100%;
+  padding: 1rem 0;                /* Espaciado sutil arriba y abajo */
+}
+
+/* 2. El bloque de texto (Label + Descripción) */
+.settings-row .text {
+  display: flex;
+  flex-direction: column;         /* Apila el título arriba y la descripción abajo */
+  gap: 0.25rem;
+}
+
 </style>

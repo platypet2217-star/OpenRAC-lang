@@ -27,19 +27,19 @@
     <Icon name="folder" size={22} />
     <div class="grow">
       {#if onAndroid}
-        <h2>{t().folderPrompt.androidTitle}</h2>
+        <h2>{$t.folderPrompt?.androidTitle}</h2>
         <p class="muted">
-          {t().folderPrompt.androidDesc}
+          {$t.folderPrompt?.androidDesc}
         </p>
       {:else if askFolder}
-        <h2>{t().folderPrompt.pcTitle}</h2>
+        <h2>{$t.folderPrompt?.pcTitle}</h2>
         <p class="muted">
-          {t().folderPrompt.pcDesc}
+          {$t.folderPrompt?.pcDesc}
         </p>
       {:else}
-        <h2>{t().folderPrompt.emptyFolderTitle}</h2>
+        <h2>{$t.folderPrompt?.emptyFolderTitle}</h2>
         <p class="muted">
-          {t().folderPrompt.emptyFolderDesc}
+          {$t.folderPrompt?.emptyFolderDesc}
         </p>
       {/if}
     </div>

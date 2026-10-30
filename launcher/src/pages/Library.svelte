@@ -12,6 +12,7 @@
   import { onAndroid } from "$lib/api";
   import { app, openVersion } from "$lib/app.svelte";
   import { playerVersion } from "$lib/player.svelte";
+  import { t } from '../lib/i18n/i18n';
 
   const lib = $derived(app.library);
   /** The version to open: the last one used, when it is still in the library, else the first game's. */
@@ -56,7 +57,7 @@
       {/each}
     </div>
   {:else}
-    <p class="muted row"><span class="spinner"></span>Reading your games…</p>
+    <p class="muted row"><span class="spinner"></span>{$t.library?.reading}</p>
   {/if}
 </div>
 
