@@ -1,6 +1,11 @@
 {
     "library": {
-    "reading": "Leyendo tus juegos…"
+        "reading": "Leyendo tus juegos…"
+    },
+    "header": {
+        "pageGames": "Juegos",
+        "pageMods": "Mods",
+        "pageSettings": "Ajustes"
     },
     "settings": {
         "languageLabel": "Idioma",

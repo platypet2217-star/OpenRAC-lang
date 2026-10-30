@@ -9,6 +9,7 @@
   import { untrack } from "svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import Logo from "./Logo.svelte";
+  import { t } from '../lib/i18n/i18n';
 
   /** The first run: the bar with the name only, nothing to go to yet. */
   /** `shown`: the page on screen, which follows app.page inside a page's slide (App.svelte), so that
@@ -19,13 +20,13 @@
   // ran (Activity) opens from the running job here and from a game's menu. With
   // developer tools on, Develop is a tab of its own: the checkout, each version and the jobs.
   const tabs = $derived<{ page: Page; label: string; icon: IconName }[]>([
-    { page: "library", label: "Games", icon: "library" },
+    { page: "library", label: $t.header?.pageGames, icon: "library" },
     // Every launcher, installed or on a checkout (an installed one mods in its data folder,
     // tools/bundle_standalone.py). Android's has the mods, Enhanced graphics and the packs, without
     // the level editor (no Godot there: Mods.svelte).
-    { page: "mods", label: "Mods", icon: "edit" },
-    ...(app.config?.developer ? [{ page: "develop" as Page, label: "Develop", icon: "terminal" as IconName }] : []),
-    { page: "settings", label: "Settings", icon: "gear" },
+    { page: "mods", label: $t.header?.pageMods, icon: "edit" },
+    ...(app.config?.developer ? [{ page: "develop" as Page, label: $t.header?.pageDevelop, icon: "terminal" as IconName }] : []),
+    { page: "settings", label: $t.header?.pageSettings, icon: "gear" },
   ]);
 
   const running = $derived(runningJob());
