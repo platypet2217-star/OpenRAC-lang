@@ -3,8 +3,8 @@ import es from './es.json';
 
 const translations: Record<string, any> = { en, es };
 
-// 1. Intentar cargar el idioma guardado previamente en el equipo.
-// Si no existe ninguno guardado, usamos 'en' por defecto.
+// 1. Attempt to load the language previously saved on the computer.
+// If none is saved, we use “en” by default.
 const savedLocale = typeof window !== 'undefined' ? localStorage.getItem('openrac_locale') : null;
 let _locale = savedLocale && savedLocale in translations ? savedLocale : 'en';
 
@@ -18,7 +18,7 @@ export const i18n = {
     if (lang in translations) {
       _locale = lang;
       
-      // 2. Guardar la nueva selección en el almacenamiento local del equipo
+      // 2. Save the new selection in the computer's local storage
       if (typeof window !== 'undefined') {
         localStorage.setItem('openrac_locale', lang);
       }

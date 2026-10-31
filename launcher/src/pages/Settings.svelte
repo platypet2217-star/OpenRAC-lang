@@ -220,10 +220,10 @@
 
   let updateTrigger = $state(0);
 
-  // Nos acoplamos a los cambios del objeto i18n externo
+  // We adapt to changes in the external i18n object
   $effect(() => {
     return i18n._subscribe(() => {
-      updateTrigger += 1; // Incrementa el trigger para redibujar la vista al cambiar de idioma
+      updateTrigger += 1; // Increment the trigger to redraw the view when the language changes
     });
   });
 </script>
@@ -461,7 +461,7 @@
                 <option value="en">English</option>
                 <option value="es">Español</option>
               </select>
-              <!-- Esto añade la flecha personalizada si el diseño del proyecto lo requiere -->
+              <!-- This adds the custom arrow if the project design requires it -->
                <span class="select-arrow"></span>
               </div>
             </div>
