@@ -3,20 +3,43 @@ import es from './es.json';
 
 const translations: Record<string, any> = { en, es };
 
-let _locale = 'en';
+// 1. Intentar cargar el idioma guardado previamente en el equipo.
+// Si no existe ninguno guardado, usamos 'en' por defecto.
+const savedLocale = typeof window !== 'undefined' ? localStorage.getItem('openrac_locale') : null;
+let _locale = savedLocale && savedLocale in translations ? savedLocale : 'en';
+
 let _listeners: (() => void)[] = [];
 
-// CAMBIA "pub" POR "export" AQUÍ:
 export const i18n = {
   get currentLocale() {
     return _locale;
   },
   set currentLocale(lang: string) {
-    _locale = lang;
-    _listeners.forEach(ctx => ctx());
+    if (lang in translations) {
+      _locale = lang;
+      
+      // 2. Guardar la nueva selección en el almacenamiento local del equipo
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('openrac_locale', lang);
+      }
+      
+      _listeners.forEach(ctx => ctx());
+    }
   },
   get t() {
-    return translations[_locale] || translations['en'];
+    const currentTranslations = translations[_locale] || translations['en'];
+    
+    return new Proxy(currentTranslations, {
+      get(target, prop: string) {
+        if (prop in target) {
+          return target[prop];
+        }
+        if (prop in translations['en']) {
+          return (translations['en'] as any)[prop];
+        }
+        return prop;
+      }
+    });
   },
   _subscribe(cb: () => void) {
     _listeners.push(cb);
