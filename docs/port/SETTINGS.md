@@ -79,13 +79,14 @@ The legacy `probe_lighting` key is accepted but ignored and is omitted when savi
 | GTAO strength | `gtao_strength` | `0.0` to `3.0` (default `1.0`) | Multiplies indirect-light occlusion; zero leaves the picture unchanged |
 | Texture filtering | `texture_filter` | `normal`, `edge-aware` (default with Enhanced Graphics) | In Graphics > Enhanced Settings, enabled by the Enhanced graphics master switch. Enlarged world textures (meshes, reflections, sky and world effects): original sampling or cached 2x edge-aware colour reconstruction with directional debanding (Vulkan compute only; OpenGL supports Normal only; other saved values use Normal there). The cache is limited to 64 MiB per texture pool and falls back to Normal when full. Alpha/cutout coverage, shadow/depth sampling, HUD text and distant mip/anisotropic filtering are unchanged |
 | Anisotropic filtering | `anisotropy` | `auto` (default), `1` (`off`: trilinear), `2`, `4`, `8`, `16` | Auto uses 4x with Enhanced Graphics and Off with OpenGL or original graphics. Explicit choices are preserved across modes. The anisotropic filter of the world's textures is held to what the driver offers |
+| Texture pack | `texture_pack` | `0`, `1` (default `1`) | Reads a texture pack from `<data>/texture_packs/<game id>/` (`rac1-pal`, `rac1-ntsc`), PNGs named by the textures they replace, at any size ([TEXTURE_PACKS.md](TEXTURE_PACKS.md)). No folder, no change. Counts from the next start |
 | Scenery detail | `original_lod` | `0` (Full, default), `1` (Original) | For low-end devices, Original draws no tie (scenery model) or shrub beyond the game's draw distances (a tie's own, at most 720 units; a shrub's at least 16, a billboard class's at least its fade distance + 24, at most 500), each one it draws at full detail. The game's lower tie LODs are not drawn: in captures they saved a few percent of the triangles for twice the ties' draws. The shrubs' fade and billboards are not drawn either: a billboard class keeps its mesh out to its distance, and an instance leaves a few units past it. Full draws every tie and shrub however far, as before. Needs levels exported again (the launcher's level export) for the shrub limits; with an older export Original limits only the ties |
 | VSync | `vsync` | `on`, `off`, `adaptive` | Whether a frame waits for the display's refresh. `adaptive` waits, but shows a frame that comes late at once (it tears) rather than a refresh later; a driver without it gives `on` |
 | Frame rate | `frame_rate` | `display`, `original`, a number, `unlimited` | How many frames are drawn (section 2). The page offers 30, 60, 75, 90, 120, 144, 165, 240 and 360; a file may hold any number from 20 to 1000 |
 | Frame cap | `frame_rate` | | The same key from another side: turns the cap on and moves it five frames a second at a time, for a rate the list does not have |
 | Frame counter (F2) | `show_fps` | `0` (off), `1` (FPS and whole-frame time), `2` (FPS, CPU and GPU milliseconds) | F2 cycles all three modes. Whole-frame time measures completed presentation intervals, including swap and pacing waits, and agrees with FPS. CPU uses those same intervals with swap-call time removed: all intervening simulation ticks, preparation, rendering and other waits count, even when rendering is skipped. This is elapsed CPU-side time, not processor utilisation. GPU remains the sum of asynchronously measured passes; missing samples show `--`. Updates four times a second |
-| Low-latency frames | `low_latency_frames` | `0` (default), `1` | Frames between ticks are not held half a tick behind the last tick (the next tick starts on time, and without VSync the scene no longer stands still for half a tick and then jumps), and fewer finished frames wait for the display: Vulkan uses as few swapchain images as the surface allows and keeps one frame in flight, OpenGL waits for the card after each swap. Only the picture's timing changes, never the game's ticks; it can cost frames on a slow graphics card. Off by default so the picture comes with the timing players have learnt. Drawer: Graphics |
-| Fresh pad input | `fresh_input` | `0` (default), `1` | The pads are read again just before each tick, not only at the end of the last one, so a press reaches the game up to a tick sooner. The game still reads one state of the pad a tick and its logic is unchanged, but a trick timed by feel lands about a frame earlier, which is why it is off by default. Drawer: Sound and game |
+| Low-latency frames | `low_latency_frames` | `0` (default), `1` | Draws the frames between game ticks sooner and keeps fewer finished frames waiting for the display, so the picture reacts faster. Only the timing of the picture changes, never the game's ticks. On OpenGL it can cost frames on a slow graphics card. Off by default. Drawer: Latency; the game's Video options page |
+| Responsive controls | `responsive_controls` | `0` (default), `1` | Reads the pads again just before each tick, so a press reaches the game up to a tick sooner. Also turns the camera in the frames between ticks with the right stick as it is now, so a turn shows at once (see "The camera between ticks"; not at the `original` frame rate). The game's logic is unchanged, but a trick timed by feel lands about a frame earlier, so it is off by default. Replaces Responsive pad (`fresh_input`) and Responsive camera (`camera_latch`); those keys are ignored, so it starts off. Drawer: Latency; the game's Video options page |
 | (Alt) | `menu_bar` | `1`, `0` | The menus along the window's top on Windows and Linux (macOS has them in its own menu bar) |
 | Mute in background | `mute_unfocused` | `0`, `1` | Silence while another window has the keyboard |
 | Game fixes: one row each | `fix_...` | `1` (the port's fix), `0` (the console's behaviour) | What the port changes from the console that a player may switch back (section 8). Ratchet & Clank: `fix_wide_moby_effects`, `fix_wide_nanotech_orbs`, `fix_wide_liquids` |
@@ -163,8 +164,60 @@ With VSync on or adaptive, a numeric cap is an upper bound: a 120 FPS cap on a
 share one deadline, so asynchronous Vulkan presentation does not add a second
 refresh-length sleep to the game tick.
 
+How the frame cap keeps frames even:
+
+- **VSync off, low-latency frames off, a cap above the game's tick rate**
+  (for example 120 or 144): each frame has a fixed time on the screen, one cap
+  frame after the last. The frame is drawn a little before that time, then
+  waits for it and is shown exactly on time. The picture is drawn for that
+  moment too, so the motion is even. A tick may start a few milliseconds late
+  to let such a frame out first (never more than half a tick). The game's
+  logic does not change. The cost is about 1-2 ms more input latency.
+- **Everything else** (VSync on, low-latency frames on, a cap of 60 or less,
+  Android): a frame starts at its time and is shown as soon as it is drawn.
+  With VSync on the display already keeps frames even. With a cap of 60 or
+  less each frame belongs to one tick and cannot start before the tick ends.
+  On Android a frame is only ever shown at the next refresh.
+
+All of these waits are precise to a few microseconds
+(`port/common/precise_wait.h`). The system sleeps until just before the time
+and the last bit is a short busy wait. A plain sleep can wake up a millisecond
+or more late, which shows as an uneven frame.
+
 The display's refresh rate is read when the window says it moved to another
 display or the display changed mode, not polled.
+
+### The camera between ticks
+
+Without help, a push of the right stick shows only after a tick has read it
+and the frames have caught up: a tick and a half (30 ms at 50 Hz) late, half a
+tick with low-latency frames. With `responsive_controls` on (Responsive
+controls), each frame between ticks turns the camera to where the game's follow
+camera will be when the frame is shown. It asks the game's own camera code how
+far the stick will turn it ([camera_latch.cpp](../../port/game/common/frontend/camera_latch.cpp),
+[rac1/host/camera_latch.c](../../port/game/rac1/host/camera_latch.c)).
+In Veldin (US, stick held right for 150 ticks) the guess was off by 0.1 degree
+at most.
+
+- **The game is untouched.** Its ticks, camera variables and trace are the same
+  with the setting on and off.
+- **No jump at the next tick.** The game's real camera takes over, and any small
+  miss fades within a few frames. This works at any frame rate: several frames
+  a tick, one (a frame cap of 60 on NTSC), or fewer
+  ([latch_fade.h](../../port/game/common/frontend/latch_fade.h), tested by
+  `frontend_latch_fade`).
+- **Letting go.** The game's camera slows down over about 30 ticks after the
+  stick is let go. The latch predicts that too, so the picture slows with it
+  instead of stopping ahead and turning back.
+- **Only in normal play,** with the follow camera, the stick turn not locked and
+  the stick off its dead zone. Cutscenes, menus, fixed cameras, the ship and
+  the vertical stick work as before.
+
+It is off by default, because the same switch also reads the pad again before
+each tick, which shifts tricks timed by feel. It changes only the frames the
+port adds between ticks, which the console never drew, and only while the right
+stick turns the camera.
+`OPENRAC_CAMERA_LATCH_LOG=1` logs each tick's turn and the guess for it.
 
 ## 3. The game's 50 Hz / 60 Hz option
 
@@ -358,13 +411,13 @@ follows ReRAC's idea and says so in
 
 | Setting | OpenGOAL | ReRAC | OpenRAC | |
 |---|---|---|---|---|
-| Choose the controller, port mapping | yes | first pad only | first two gamepads, in order | **later** |
-| Rebind controller, keyboard, mouse | yes | no | no: the table in `input.cpp` | **later**: its own page and its own file section; input is not this work's |
-| Stick deadzone, sensitivity | yes | fixed scale 1.33 | the game's own | **later**, with rebinding |
+| Choose the controller, port mapping | yes | first pad only | each player's controller by its id, or the next free one ([CONTROLS.md](CONTROLS.md)) | **now** |
+| Rebind controller, keyboard, mouse | yes | no | the controller's buttons and sticks, chords, every game's and each game's own, in their own files and a window in the game ([CONTROLS.md](CONTROLS.md)); keys on the buttons only | **now** for the controller; keyboard and mouse **later** |
+| Stick deadzone, sensitivity | yes | fixed scale 1.33 | the game's own, and the port's per stick if set, with inversion | **now** |
 | Vibration on or off | yes | no rumble | rumble as the game drives it, no switch | **later**: a row on the game's own options |
 | Camera inverted, speed | its own page | the game's Camera page | the game's Camera page | **never** in the port: the game has it |
 | Keyboard, mouse camera and movement | yes | mouse as right stick | keyboard as a pad, no mouse | **later** |
-| Ignore the controller while unfocused | yes | no | no | **later**, beside `mute_unfocused` |
+| Ignore the controller while unfocused | yes | no | `pad_background = 0` ([CONTROLS.md](CONTROLS.md)) | **now** |
 | Controller LED, trigger effects, pressure | yes | no | no | **never** for the LED and triggers (nothing in the game drives them); pressure **later** |
 
 ### Other
@@ -465,6 +518,8 @@ Ratchet & Clank's fixes now, all on by default and all for both discs:
 | `fix_wide_moby_effects` | MobyProc's "drawn" test ([render_native.c](../../port/game/rac1/host/render_native.c), [moby_view.h](../../port/game/rac1/host/moby_view.h)) against the 4:3 view: mobys near the sides of a wide picture lose their effects |
 | `fix_wide_nanotech_orbs` | the nanotech cluster's sphere test ([wide_view.c](../../port/game/rac1/host/wide_view.c)) against the 4:3 view: crates near the sides lose their orb |
 | `fix_wide_liquids` | the draw callback lists and the liquid grid's cull ([wide_view.c](../../port/game/rac1/host/wide_view.c)) against the 4:3 view: seas, lava and sand are missing near the sides |
+| `fix_wide_air_traffic` | Kerwan's air traffic's sphere test ([wide_view.c](../../port/game/rac1/host/wide_view.c)) against the 4:3 view: the traffic stops near the sides, in view |
+| `fix_wide_fires` | the smoke and fire emitter's sphere test ([wide_view.c](../../port/game/rac1/host/wide_view.c)) against the 4:3 view: fires near the sides go out |
 
 At 4:3 none of them changes anything.
 

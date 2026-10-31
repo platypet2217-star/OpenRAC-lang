@@ -1003,32 +1003,52 @@ class Unit:
         (the VU0's, COP0's, a sqrt.s) are code the host does not run: the statement stays a barrier,
         as before, and the function's report lists what it skips (report.json
         "inline_assembly_skipped"), since what those instructions compute is missing from the
-        translation. One whose text hostgen could not read (a header's, a macro's) is a barrier."""
+        translation. One whose text hostgen could not read (instructions a macro's argument spells)
+        is a barrier, reported the same way: what it does is missing too."""
         text = n.get("asmString")
         if text is None:
+            self._asm_skipped(["(asm text hostgen cannot read)"])
             return "GBARRIER();"
         words = text.replace(";", "\n").split("\n")
         ops = [w.strip().split()[0] for w in words if w.strip()]
         cons = n.get("asmConstraints") or {}
+        store = re.fullmatch(r"\s*sw\s+%(\d+)\s*,\s*%(\d+)\s*", text)
+        if store and cons.get("out"):
+            # One word stored to a memory output (the NTSC decomp's func_0012C4C8,
+            # src/sdk/video/mpeg/headers/update_mpeg_frame_size.c: `__asm__("sw %2,%1" : "=r"(field5),
+            # "=m"(mpeg->width) : "r"(width), "0"(last_field))`): the store, then each register output
+            # takes the input tied to it, as below.
+            kids = _inner(n)
+            outs, ins = kids[:len(cons["out"])], kids[len(cons["out"]):]
+            src, dst = int(store.group(1)), int(store.group(2))
+            if (dst < len(outs) and "m" in cons["out"][dst] and len(outs) <= src < len(outs) + len(ins)
+                    and cons["in"][src - len(outs)].strip() == "r"):
+                stored = f"({self.lv(outs[dst]).text} = {self.convert(ins[src - len(outs)], self.ty(outs[dst]))});"
+                return " ".join(["GBARRIER();", stored, *self._asm_tied(cons, outs, ins, skip=dst)])
         if not ops and cons.get("out"):
             # No instructions, only operands: each output gets the input tied to it ("0" for output 0), the
             # value the register holds (kputchar's pointer to the SIO's transmit register, hidden this way from
             # the optimizer). An output tied to none keeps whatever it held, as before, and is reported.
             kids = _inner(n)
             outs, ins = kids[:len(cons["out"])], kids[len(cons["out"]):]
-            stmts = ["GBARRIER();"]
-            for k, (c, o) in enumerate(zip(cons["out"], outs)):
-                if c.startswith("+"):
-                    continue
-                tied = [i for i, ic in enumerate(cons["in"]) if ic.strip() == str(k)]
-                if not tied or tied[0] >= len(ins):
-                    self._asm_skipped([f"(output {k} without an input)"])
-                    continue
-                stmts.append(f"({self.lv(o).text} = {self.convert(ins[tied[0]], self.ty(o))});")
-            return " ".join(stmts)
+            return " ".join(["GBARRIER();", *self._asm_tied(cons, outs, ins)])
         if not all(op in ("sync", "sync.l", "sync.p", "nop") for op in ops):
             self._asm_skipped(ops)
         return "GBARRIER();"
+
+    def _asm_tied(self, cons: dict, outs: list, ins: list, skip: int = -1) -> list[str]:
+        """Each register output of an asm statement (but SKIP) takes the input tied to it; one tied to
+        none keeps whatever it held, and is reported."""
+        stmts = []
+        for k, (c, o) in enumerate(zip(cons["out"], outs)):
+            if k == skip or c.startswith("+"):
+                continue
+            tied = [i for i, ic in enumerate(cons["in"]) if ic.strip() == str(k)]
+            if not tied or tied[0] >= len(ins):
+                self._asm_skipped([f"(output {k} without an input)"])
+                continue
+            stmts.append(f"({self.lv(o).text} = {self.convert(ins[tied[0]], self.ty(o))});")
+        return stmts
 
     def _asm_skipped(self, what: list[str]) -> None:
         """Notes instructions (or operands) of an asm statement the host does not run in the report of
@@ -1049,6 +1069,36 @@ class Unit:
     # register, and passes them on whole. Here such a call keeps its 64 bits, and a local that only
     # receives it is declared 64-bit.
 
+    def _wide_cast_callee(self, c: dict) -> ctype.Type | None:
+        """The 64-bit result type of a function the call site casts to one returning int, as
+        `((int (*)(int))get_effect_texture)(i)` (the smoke and fire emitter's draw, a fakematch):
+        the cast is no instruction on the EE, whose register still holds the 64 bits the function
+        returned, and the caller's sd stores them all. Called through the cast's type, the TEX0's
+        upper word (CBP, CPSM, CSM) came back as the sign of the lower one, and the fires of
+        Oltanis's buildings drew with no palette. None for any other callee."""
+        if c.get("kind") != "CStyleCastExpr":
+            return None
+        pt = self.resolve(self.ty(c))
+        ft = self.resolve(pt.to) if isinstance(pt, ctype.Ptr) else pt
+        if not isinstance(ft, ctype.Func) or self.cls(ft.ret) != "int" or self._wide(ft.ret):
+            return None
+        inner = _strip_parens(_inner(c)[0])
+        if inner.get("kind") != "ImplicitCastExpr" or inner.get("castKind") != "FunctionToPointerDecay":
+            return None
+        target = _strip_parens(_inner(inner)[0])
+        if target.get("kind") != "DeclRefExpr" or target["referencedDecl"].get("kind") != "FunctionDecl":
+            return None
+        own = self.resolve(self.ty(target))
+        if isinstance(own, ctype.Func) and self._wide(own.ret):
+            return self._canon_type(own.ret)
+        sym = self._callee_symbol(target)
+        if sym in getattr(self.program, "returns_64", ()):
+            own_f = self.program.lookup(self.unit, sym)
+            if own_f is not None and self._wide(own_f.sig.ret):
+                return self._canon_type(own_f.sig.ret)
+            return ctype.Base("long long")
+        return None
+
     def _wide_call(self, n: dict) -> bool:
         while n.get("kind") in ("ParenExpr", "ImplicitCastExpr", "CStyleCastExpr"):
             if n.get("kind") == "CStyleCastExpr" and self.cls(self.ty(n)) != "int":
@@ -1057,6 +1107,8 @@ class Unit:
         if n.get("kind") != "CallExpr":
             return False
         c = _strip_parens(_inner(n)[0])
+        if self._wide_cast_callee(c) is not None:
+            return True
         if c.get("kind") == "ImplicitCastExpr" and c.get("castKind") == "FunctionToPointerDecay":
             target = _strip_parens(_inner(c)[0])
             if target.get("kind") == "DeclRefExpr" and target["referencedDecl"].get("kind") == "FunctionDecl":
@@ -1805,10 +1857,11 @@ class Unit:
         if address is None:
             raise Unsupported(f"global {sym} has no known address")
         named_level = self.program.data_level(sym) if hasattr(self.program, "data_level") else None
-        addr = self.global_address(address, self._code_symbol(sym) is not None, named_level)
+        addr = self.global_address(address, self._code_symbol(sym) is not None, named_level, sym)
         return LV(self.gref(t, addr), addr)
 
-    def global_address(self, address: int, code: bool = False, named_level: int | None = None) -> str:
+    def global_address(self, address: int, code: bool = False, named_level: int | None = None,
+                       symbol: str | None = None) -> str:
         """The address of a global at `address` as the running program finds it: in a range the
         levels move (hostgen.json "relocate"), the loaded level's (guest.h). `code`: the address is
         an executable function's code read as data; `named_level`: the level its name gives
@@ -1846,6 +1899,8 @@ class Unit:
                 addr = f"openrac_data_in_copy({home}, {hexaddr(canon)}, {size}u, openrac_self_, {addr})"
             elif level is not None and low <= address < high:
                 addr = f"OPENRAC_LDATA({level}, {addr})"
+        if address in getattr(self.program, "expanded_target_table_addresses", set()):
+            addr = f"OPENRAC_TARGET_TABLE({addr})"
         return addr
 
     def _variant_call(self, sym: str) -> tuple[int, int, int, int] | None:
@@ -1995,7 +2050,7 @@ class Unit:
         if c.get("kind") == "ImplicitCastExpr" and c.get("castKind") == "BuiltinFnToFnPtr":
             return self.builtin_call(_strip_parens(_inner(c)[0]), args)
         named = None  # the function a call by name reaches through a code address
-        wide_ret = None
+        wide_ret = self._wide_cast_callee(c)
         if c.get("kind") == "ImplicitCastExpr" and c.get("castKind") == "FunctionToPointerDecay":
             target = _strip_parens(_inner(c)[0])
             if target.get("kind") == "DeclRefExpr" and target["referencedDecl"].get("kind") == "FunctionDecl":
@@ -2134,6 +2189,9 @@ class Unit:
             else:
                 fp = self.function_value(target)
         else:
+            direct = self._cast_exe_call(c, wide_ret)
+            if direct is not None:
+                return self.direct_call(direct, args, result_t)
             fp = self.rv(callee)
         # A call through a code address: the call site's own type.
         pt = self.resolve(self.ty(callee))
@@ -2153,6 +2211,34 @@ class Unit:
                 return defined
         values = [self.rv(a) for a in args]
         return f"GFN({ctype.fn_pointer(hostft)}, {fp})({', '.join(values)})"
+
+    def _cast_exe_call(self, callee: dict, wide_ret) -> str | None:
+        """The function a call through a cast of a plain executable function names (PAL's
+        `((s32 (*)(s32))func_001F98C0)(12)`), called directly as a call by name is; else None.
+        Through OPENRAC_CODE such a call found no level copy for an executable function the
+        catalogue places nowhere else, kept the executable's address, and ran the level's own
+        function there: the PAL flight to Quartu faded to black for 1.4M frames."""
+        if callee.get("kind") != "CStyleCastExpr" or wide_ret is not None or self.fn is None:
+            return None
+        inner = _strip_parens(_inner(callee)[0])
+        if inner.get("kind") == "ImplicitCastExpr" and inner.get("castKind") == "FunctionToPointerDecay":
+            inner = _strip_parens(_inner(inner)[0])
+        if inner.get("kind") != "DeclRefExpr" or inner["referencedDecl"].get("kind") != "FunctionDecl":
+            return None
+        sym = self._callee_symbol(inner)
+        if "__" in sym or sym in getattr(self.program, "splits", {}) or self._folded_places(sym):
+            return None
+        places = self.program.code_places(sym)
+        if not places or any(o >= 0 for o, _ in places):
+            return None
+        if not getattr(self.program, "relocate", None) or LEVEL_NAME.match(self.fn.code):
+            return None  # code_address forms no OPENRAC_CODE here
+        if self._level_hook(sym) is not None:
+            return None
+        f = self.program.lookup(self.unit, sym)
+        if f is None or not f.sig.prototyped or f.sig.variadic:
+            return None
+        return sym
 
     def _function_at(self, overlay: int, address: int) -> str | None:
         """The function a call through that place finds (Program.function_at), or None."""

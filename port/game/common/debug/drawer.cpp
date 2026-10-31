@@ -570,12 +570,21 @@ void drawer(const Shown& shown) {
             )) {
             change_setting(options_menu::kShowFps, by);
         }
+        card_end();
+
+        // What lowers the input lag: when the pad is read and frames are shown, never the game's
+        // ticks (settings.h).
+        drawer_section("Latency");
+        card_begin();
         // Fewer frames queued for the display, and none held back half a tick (settings.h). Off
         // by default: the picture then comes as players have learnt its timing.
         if (drawer_switch("Low-latency frames", settings::get().low_latency_frames)) {
-            settings::get().low_latency_frames = !settings::get().low_latency_frames;
-            settings::save();
-            s.settings_changed = true;
+            change_setting(options_menu::kLowLatency, 1);
+        }
+        // Reads the pad again before each tick and turns the camera between ticks with the right
+        // stick as it is now (settings.h). Off by default: the timing players have learnt.
+        if (drawer_switch("Responsive controls", settings::get().responsive_controls)) {
+            change_setting(options_menu::kResponsiveControls, 1);
         }
         card_end();
 
@@ -592,11 +601,10 @@ void drawer(const Shown& shown) {
         if (drawer_switch("Skip cutscenes", settings::get().skip_cutscenes)) {
             change_setting(options_menu::kSkipCutscenes, 1);
         }
-        // The pad read again just before each tick (settings.h). Off by default: a press then
-        // reaches the game a tick later, as players have learnt it.
-        if (drawer_switch("Fresh pad input", settings::get().fresh_input)) {
-            settings::get().fresh_input = !settings::get().fresh_input;
-            settings::save();
+        // The controls window (debug/controls_window.cpp), over the game once the drawer is shut.
+        if (drawer_row("Controller bindings")) {
+            s.controls_window = true;
+            set_drawer(false);
         }
         card_end();
 

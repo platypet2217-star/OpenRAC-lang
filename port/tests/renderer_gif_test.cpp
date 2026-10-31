@@ -6,9 +6,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 #include "check.h"
 #include "renderer/direct.h"
+#include "renderer/effects.h"
 #include "renderer_gif_builder.h"
 
 namespace {
@@ -295,6 +297,31 @@ void no_sample_no_pixel() {
           == 0);
 }
 
+// A plain fill over the screen's last column or line goes on to its edge: the game's fills run
+// from -0.5 to 511.5, and drawn there they left the right and bottom half pixel unfilled (a line
+// of the old picture along them under a fade). Edges inside the screen stay where they are.
+void fill_to_the_edges() {
+    TexturePool textures;
+    auto corners = [&](double x0, double y0, double x1, double y1) {
+        GifInterpreter gif(textures);
+        GifBuilder b;
+        b
+            .ad({{gs::kPrim, prim(gs::PrimKind::Sprite, false, false, false)},
+                 {gs::kRgbaq, rgbaq(0, 0, 0, 0x80)},
+                 {gs::kXyz2, xyz2(x0, y0, 0)},
+                 {gs::kXyz2, xyz2(x1, y1, 0)}},
+                true);
+        CHECK(gif.gif(b.bytes));
+        CHECK(gif.vertices().size() == 6);
+        return std::make_pair(gif.vertices()[0], gif.vertices()[4]);
+    };
+    const auto [first, last] = corners(-0.5, 99.5, 511.5, 447.5);
+    CHECK(near(first.x, -1.0f - 0.5f / 256.0f) && near(first.y, 1.0f - 99.5f / 224.0f));
+    CHECK(near(last.x, 1.0f) && near(last.y, -1.0f));
+    const auto [inner_first, inner_last] = corners(9.5, 99.5, 300.5, 200.5);
+    CHECK(near(inner_last.x, 300.5f / 256.0f - 1.0f) && near(inner_last.y, 1.0f - 200.5f / 224.0f));
+}
+
 void textures_and_vif() {
     TexturePool textures;
     GifInterpreter gif(textures);
@@ -445,14 +472,40 @@ void texture_under_draw_buffer() {
     }
 }
 
+// Weights the GS takes above 1 (As, FIX up to 0xFF) go to the shader, and the strips' TEST keeps
+// a layer that writes no Z (Oltanis's ice) out of the liquids.
+void blend_weights() {
+    using openrac::test::alpha_reg;
+    const auto blend = [](std::uint64_t bits) {
+        return translate_blend(gs::Alpha::decode(bits));
+    };
+    const GlBlend add_as = blend(alpha_reg(0, 2, 0, 1));  // Cs * As + Cd
+    CHECK(add_as.source_scale == SourceScale::Alpha && add_as.src == 1u && add_as.dst == 1u);
+    const GlBlend add_fix = blend(alpha_reg(0, 2, 2, 1, 0xC0));  // Cs * FIX + Cd, FIX 1.5
+    CHECK(add_fix.source_scale == SourceScale::Fix && add_fix.fix == 1.5f && add_fix.exact);
+    const GlBlend sub_fix = blend(alpha_reg(2, 0, 2, 1, 0xA0));  // Cd - Cs * FIX
+    CHECK(sub_fix.source_scale == SourceScale::Fix && sub_fix.equation == 0x800Bu);
+    // FIX at or below 1 keeps GL's constant; (Cs - Cd) As + Cd keeps SRC_ALPHA.
+    CHECK(blend(alpha_reg(0, 2, 2, 1, 0x80)).source_scale == SourceScale::None);
+    CHECK(blend(alpha_reg(0, 1, 0, 1)).source_scale == SourceScale::None);
+    CHECK(!blend(alpha_reg(0, 1, 2, 1, 0xC0)).exact);  // (Cs - Cd) FIX + Cd beyond 1
+
+    CHECK(liquid_strip(0x8000000064ull, 0));         // no TEST seen: a sea, as before
+    CHECK(liquid_strip(0x8000000064ull, 0x5360B));   // Z written where As >= 0x60
+    CHECK(!liquid_strip(0x8000000064ull, 0x513F1));  // NEVER, FB_ONLY: no Z
+    CHECK(!liquid_strip(0x4000000064ull, 0x5360B));  // FIX 0x40: not drawn solid
+}
+
 }  // namespace
 
 int main() {
+    blend_weights();
     sprite();
     strips_and_kicks();
     packed_and_reglist();
     draw_groups();
     no_sample_no_pixel();
+    fill_to_the_edges();
     textures_and_vif();
     offscreen_then_upload();
     frame_named_without_draw();

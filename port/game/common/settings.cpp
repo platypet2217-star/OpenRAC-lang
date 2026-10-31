@@ -287,6 +287,8 @@ void load(const std::filesystem::path& file) {
             known = parse_bool(value, s.enhanced_shadows);
         } else if (key == "rim_light") {
             known = parse_bool(value, s.rim_light);
+        } else if (key == "texture_pack") {
+            known = parse_bool(value, s.texture_pack);
         } else if (key == "rim_shadow_lift") {
             known = parse_bool(value, s.rim_shadow_lift);
         } else if (key == "rim_lift_exponent") {
@@ -391,10 +393,12 @@ void load(const std::filesystem::path& file) {
             known = parse_bool(value, s.mute_unfocused);
         } else if (key == "original_lod") {
             known = parse_bool(value, s.original_lod);
-        } else if (key == "fresh_input") {
-            known = parse_bool(value, s.fresh_input);
+        } else if (key == "responsive_controls") {
+            known = parse_bool(value, s.responsive_controls);
         } else if (key == "low_latency_frames") {
             known = parse_bool(value, s.low_latency_frames);
+        } else if (key == "fresh_input" || key == "camera_latch") {
+            // Old switches merged into responsive_controls: dropped, so it starts off.
         } else if (key == "skip_cutscenes") {
             known = parse_bool(value, s.skip_cutscenes);
         } else if (key == "strafe" || key == "lock_strafe") {
@@ -409,6 +413,11 @@ void load(const std::filesystem::path& file) {
             s.touch_layout = value;  // TouchPad::set_layout leaves out what it does not know
         } else if (key == "verbose_log") {
             known = parse_bool(value, s.verbose_log);
+        } else if (key.starts_with(kBindPrefix)) {
+            // What the player bound a pad button to. The names are read where the pad is
+            // (platform/bindings.h), not here: this file knows nothing of SDL. An empty value is
+            // kept as it is, and means the port's default.
+            s.bindings[key] = value;
         } else if (key.starts_with(kGameOptionPrefix)) {
             // An option the game keeps itself (game_option): any whole number in the file's range.
             int number = 0;
@@ -512,6 +521,7 @@ void save() {
         << "\n"
         << "enhanced_shadows = " << (s.enhanced_shadows ? 1 : 0) << "\n"
         << "rim_light = " << (s.rim_light ? 1 : 0) << "\n"
+        << "texture_pack = " << (s.texture_pack ? 1 : 0) << "\n"
         << "rim_shadow_lift = " << (s.rim_shadow_lift ? 1 : 0) << "\n"
         << "rim_lift_exponent = " << s.rim_lift_exponent << "\n"
         << "rim_lift_max_gain = " << s.rim_lift_max_gain << "\n"
@@ -557,7 +567,7 @@ void save() {
         << "menu_bar = " << (s.menu_bar ? 1 : 0) << "\n"
         << "mute_unfocused = " << (s.mute_unfocused ? 1 : 0) << "\n"
         << "original_lod = " << (s.original_lod ? 1 : 0) << "\n"
-        << "fresh_input = " << (s.fresh_input ? 1 : 0) << "\n"
+        << "responsive_controls = " << (s.responsive_controls ? 1 : 0) << "\n"
         << "low_latency_frames = " << (s.low_latency_frames ? 1 : 0) << "\n"
         << "skip_cutscenes = " << (s.skip_cutscenes ? 1 : 0) << "\n"
         << "volume = " << s.volume << "\n"
@@ -572,6 +582,14 @@ void save() {
     // The game's own options, as it last set them (set_game_option).
     for (const auto& [key, value] : s.game_options) {
         out << key << " = " << value << "\n";
+    }
+    // The player's bindings, written back as they were read: this file is rewritten whole, so a
+    // key left out here would be lost the next time any setting changed.
+    if (!s.bindings.empty()) {
+        out << "# What the player bound each pad button to (the launcher's Controls)\n";
+        for (const auto& [key, value] : s.bindings) {
+            out << key << " = " << value << "\n";
+        }
     }
     if (fixes::count() > 0) {
         out << "# Game fixes: 1 the port's, 0 the console's behaviour (Options, Game fixes)\n";

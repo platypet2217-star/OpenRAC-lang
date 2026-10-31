@@ -16,6 +16,7 @@ Parsed by `Options parse(int argc, char** argv)`
 | `--window` | Open the window and run the game with graphics and input. Without it the game runs headless (no pad, no collision, no disc movies). | off |
 | `--mods <dir>` | Levels edited in the editor and packed, read *instead of* the disc's. | none |
 | `--settings <file>` | The player's settings INI. | `<data home>/openrac/settings/<id>.ini` |
+| `--controls <dir>` | The player's controls files ([CONTROLS.md](../CONTROLS.md)). | `<data home>/openrac/controls` |
 | `--plugins <file>` | The native mods' list (the manifest). | `<data>/plugins/plugins.json` |
 | `--no-mods` | **Purist mode**: load no native mod at all. | off |
 | `--levels <dir>` | The extracted levels the window draws (`level_00` … `level_18`, `level_98` flight world, `level_99` title world). | `<data>/port/<version>` |
@@ -169,8 +170,8 @@ unknown *value* warns in the log and falls back to the default; an unknown
 | `menu_bar` | `0`/`1` | `1` | |
 | `mute_unfocused` | `0`/`1` | `0` | |
 | `skip_cutscenes` | `0`/`1` | `1` | Start also presses the game's own cutscene-skip buttons. |
-| `fresh_input` | `0`/`1` | `0` | The pad read again just before each tick: presses reach the game about a tick sooner. The game's logic and its one pad read a tick are unchanged, but a trick timed by feel lands a frame earlier. |
-| `low_latency_frames` | `0`/`1` | `0` | Frames between ticks not held half a tick back, and fewer frames queued for the display (Vulkan: fewest swapchain images, one frame in flight; OpenGL: glFinish after each swap). Changes only the picture's timing; may cost frames on a slow GPU. |
+| `responsive_controls` | `0`/`1` | `0` | Reads the pad again just before each tick: presses reach the game about a tick sooner. The game's logic and its one pad read a tick are unchanged, but a trick timed by feel lands a frame earlier. Also turns the picture's camera between ticks with the right stick (the picture only). |
+| `low_latency_frames` | `0`/`1` | `0` | Frames between ticks are not held half a tick back, and fewer frames wait for the display. Changes only the picture's timing; may cost frames on a slow GPU with OpenGL. |
 | `volume` | 0–100 | `100` | |
 | `verbose_log` | `0`/`1` | `0` | |
 | `fix_wide_moby_effects` | `0`/`1` | `1` | A port fix; `0` restores the console's behaviour. |

@@ -26,12 +26,13 @@ import {
   updateChannelOf,
   updateBranchOf,
   updateSourceOf,
+  watchFirstDraw,
 } from "./api";
 import { stopSlides } from "./motion";
 import { Queue, type Job } from "./queue";
 import { backgroundStatus } from "./progress";
 import { lastLines, PLAY_ACTIONS, unseenRecent, type StopNotice } from "./reports";
-import { checkForUpdate, offerUpdate, readPutOff, type UpdateInfo } from "./updates";
+import { checkForUpdate, offerUpdate, readPutOff, switchingChannel, type UpdateInfo } from "./updates";
 
 export type Page = "library" | "game" | "mods" | "tasks" | "develop" | "settings";
 
@@ -316,6 +317,10 @@ export async function start() {
     }
     app.info = await api.appInfo();
     if (app.info.noCompositing) stopSlides();
+    if (app.info.platform === "linux" && !app.info.noCompositing) watchFirstDraw();
+    if (app.info.safeRenderingAfterCrash) {
+      toast("The launcher crashed last time, so Safe rendering is now on (Settings, Advanced).");
+    }
     // Android: the config names the carried tools' Python only once they are unpacked.
     if (onAndroid) await prepareTools();
     app.config = await firstRun(await api.getConfig());
@@ -488,7 +493,9 @@ export function dismissStopped() {
 export async function lookForUpdate(config: Config | null = app.config): Promise<boolean> {
   if (!app.info?.version) return false;
   const channel = updateChannelOf(app.info, config);
-  const up = await checkForUpdate(app.info.version, updateSourceOf(app.info, config), channel, updateBranchOf(config));
+  const source = updateSourceOf(app.info, config);
+  const switching = switchingChannel(app.info.updates, source);
+  const up = await checkForUpdate(app.info.version, source, channel, updateBranchOf(config), switching);
   app.update = up;
   return !!up;
 }

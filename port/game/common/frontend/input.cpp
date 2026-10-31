@@ -11,8 +11,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 
 #include <SDL3/SDL.h>
 
@@ -21,6 +23,7 @@
 #include "debug_menu.h"
 #include "debug_overlay.h"
 #include "frontend.h"
+#include "game/common/frontend/camera_latch.h"
 #include "game/common/frontend/geometry.h"
 #include "game/common/frontend/state.h"
 #include "mod_menu.h"
@@ -145,6 +148,49 @@ void take_keyboard() {
     }
 }
 
+void open_controls(const std::filesystem::path& dir, const std::string& game) {
+    if (!g) {
+        return;
+    }
+    // Mappings for controllers SDL does not know as gamepads (SDL's gamecontrollerdb.txt format):
+    // with one, a controller is read by position as any other.
+    std::error_code error;
+    const std::filesystem::path mappings = dir / "gamecontrollerdb.txt";
+    if (std::filesystem::exists(mappings, error)) {
+        const int added = SDL_AddGamepadMappingsFromFile(mappings.string().c_str());
+        if (added < 0) {
+            log::warn("controls: {} cannot be read: {}", mappings.string(), SDL_GetError());
+        } else {
+            log::info("controls: {} controller mapping(s) from {}", added, mappings.string());
+        }
+    }
+    const auto apply = [](const controls::Store::PlayerBindings& bindings,
+                          const platform::Players& players) {
+        g->input.set_bindings(bindings);
+        g->input.set_players(players);
+    };
+    g->controls.open(dir, game, apply);
+    settings::Settings& set = settings::get();
+    if (!set.bindings.empty() && !g->controls.file(controls::Scope::Game).read_only()) {
+        const int moved = g->controls.adopt(set.bindings);
+        log::info(
+            "controls: {} binding(s) of the settings file moved to {}",
+            moved,
+            g->controls.path(controls::Scope::Game).string()
+        );
+        set.bindings.clear();
+        settings::save();
+    }
+}
+
+controls::Store* controls_store() {
+    return g ? &g->controls : nullptr;
+}
+
+platform::Input* input() {
+    return g ? &g->input : nullptr;
+}
+
 void capture_mouse(bool capture) {
     if (g) {
         g->capture_wanted = capture;
@@ -187,7 +233,7 @@ void skip_after_mods(int port, std::uint16_t& buttons) {
 }
 
 void refresh_pads() {
-    if (g && g->window && settings::get().fresh_input) {
+    if (g && g->window && settings::get().responsive_controls) {
         g->input.refresh_pads();
     }
 }
@@ -259,6 +305,9 @@ bool pad(int port, std::uint16_t* buttons, std::uint8_t analog[4]) {
             at = std::strchr(at, ',');
             at = at ? at + 1 : nullptr;
         }
+        // The late camera latch turns a scripted run's frames by the scripted stick, as the
+        // player's by the pad's.
+        latch_scripted_stick(analog[0]);
     }
     // Start skips an in-game scene the way the game itself skips it: a pressed Start also presses
     // what the game's own skip of the scene playing reads (rac1: in a cutscene the four shoulders,

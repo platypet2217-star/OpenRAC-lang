@@ -223,6 +223,23 @@ The launcher adds a Default button of its own, unless a preset's id is
 A value that is missing, of the wrong type or out of range is the default
 (the port logs it). Settings count from the game's next start.
 
+### Assets
+
+`"assets": "assets"` names a folder inside the mod (relative, with `/`) that
+carries its own data. While the mod is loaded, the game reads each level from
+its `assets/level_NN/` before the extracted level, by the same relative path: a
+texture or a mesh there takes the place of the level's own, and a model there
+names the level's textures it does not carry by their usual paths. The mods
+loaded last come first, and every mod comes before the data packs (`--mods`).
+
+`assets/level_NN/classes.json` adds render classes, or replaces the level's
+of the same id, in the form of the level manifest's `"classes"`:
+`{"moby": {"1234": {"mesh": "mobys/my_weapon.glb", "scale": 1}}}` (also `"tie"`
+and `"shrub"`). Every class needs a `mesh`, read from the mod's folder; a
+broken `classes.json` stops the level from loading, with the reason in the log.
+The original manifests are never changed. `package_mod.py` checks the folder
+and packs it whole (hidden files left out).
+
 ## 4. Hook points
 
 A hook point is declared in a disc's `libraries.tsv`, in the `port` column:
@@ -634,6 +651,28 @@ and the page runs and follows the `probe-bake` action that bakes the probes
 from the player's own levels. Purist mode does not turn it off: it is not a
 mod. The Rust side is `core/src/enhanced.rs`.
 
+**A save says what it was played with.** While any mod is loaded, the port
+writes a small file beside each save the game writes,
+`<card>/<save folder>/save<N>.bin.mods`:
+
+```json
+{"format": 1, "saved": "2026-10-29T14:02:11", "mods": [{"id": "lock-strafe", "version": "1.0.0"}]}
+```
+
+Saving over the slot without mods removes it, so the mark is always what the
+save was last written with. The save file itself is never touched: its header
+has no room, every section carries a CRC, and a real memory card must still
+take the file ([port/assets/disc/save_game.h](../../port/assets/disc/save_game.h)).
+The game never sees the mark: `sceMcGetDir` leaves it out of a listing. The
+mark is written by [lib/mc.c](../../port/game/common/lib/mc.c) from
+`openrac_game_loaded_mods`, which the mod loader sets once at start
+([mods.cpp](../../port/game/common/mods.cpp)). The launcher's Saves block
+shows a **Mods** badge with the names on hover (`core/src/saves.rs`), and
+Ratchet & Clank (PAL) shows the same badge on the game's own memory card page
+([rac1/host/save_marks.c](../../port/game/rac1/host/save_marks.c), the
+`Pause_DrawSaveSlots` wrap); the NTSC-U disc shows it in the launcher only,
+until that page's draw is carried over.
+
 ## 10. Mods in a git repository
 
 A player pastes a repository's address in the Mods tab (**Add from a
@@ -703,8 +742,8 @@ so a modder pushes a tag and nothing else; rac1-mods uses the same file.
                              "tag": "v1.0.0", "commit": null, "pin": false } } }
 ```
 
-**Updates.** **Check for updates** (on the Mods tab, and once a day when it
-opens) asks each source for its newest release with an asset for this
+**Updates.** **Check for updates** (on the Mods tab, and once a day when the
+launcher starts, which offers what it finds in one window) asks each source for its newest release with an asset for this
 platform whose version is above the installed one (for a data pack with no
 releases, a newer commit on its branch), and offers **Update** on the mod's
 row. A pinned mod (**Keep this version**) is never offered one. An update
@@ -940,9 +979,6 @@ callback that swaps two buttons, chosen in its settings.
 
 ## 12. What is proposed or open
 
-- **Proposed: a mod with data.** A format-2 mod with an `assets` folder that
-  is a data pack, added to the packs when the mod is installed and on when the
-  mod is, so a mod can carry code and textures together.
 - **Proposed: settings in the game.** The in-game drawer showing the loaded
   mods and their settings, written back to `plugins.json`. A mod's own page
   in the front-end menu is there since 1.5 (`menu_entry`, section 6), and

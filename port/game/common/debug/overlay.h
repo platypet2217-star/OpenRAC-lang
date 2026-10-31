@@ -34,12 +34,12 @@
 #include <SDL3/SDL.h>
 
 #include "debug_overlay.h"
+#include "openrac/guest.h"
+#include "platform/bindings.h"
 
 namespace openrac::frontend::debug_overlay {
 
-// The game's main memory, 32 MB, and one moby's bytes in it (the size of
-// the game's moby struct).
-constexpr std::uint32_t kRamSize = 32u * 1024 * 1024;
+// One moby's bytes in main memory (the size of the game's moby struct).
 constexpr std::uint32_t kMobySize = 0x100;
 
 // The sections of the panel, as OPENRAC_OVERLAY names them.
@@ -77,7 +77,6 @@ constexpr std::array<const char*, 16> kButtonNames =
 
 // The main memory map: one cell per 128 KB.
 constexpr std::uint32_t kCellBytes = 128 * 1024;
-constexpr std::size_t kCells = kRamSize / kCellBytes;
 
 // One cell of the memory map (scan_ram): how much of it holds data, and whether it changed.
 struct RamCell {
@@ -108,6 +107,32 @@ struct Card {
 struct Scroll {
     bool dragged = false;
     float velocity = 0.0f;
+};
+
+// The controls window (controls_window()): which file it changes, what is being captured, and
+// what it last said.
+struct ControlsWindow {
+    bool global = false;      // the global file; else the running game's own
+    int player = -1;          // the player whose own controls are changed (0, 1); -1 every player's
+    int tab = 0;              // 0 bindings, 1 sticks and triggers, 2 players
+    char filter[64] = {};     // the bindings' rows shown: those naming this
+    int capture_target = -1;  // the target a press is being captured for; -1 none
+    // What the captured press does: replaces the target's pad inputs, adds one, or is the first
+    // or the second of a chord.
+    enum class Mode {
+        Replace,
+        Add,
+        ChordFirst,
+        ChordSecond,
+    } mode = Mode::Replace;
+    platform::Binding chord_with;  // a chord's first press, once captured
+    std::string message;           // what the last change said
+    // A press just bound that another control also has alone: offered to be taken from it.
+    int clash_target = -1;
+    platform::Binding clash_input;
+    bool confirm_reset = false;  // "Reset" asked once; asked again, it resets
+    std::string drag_key;        // a setting's slider being dragged, and where it is now
+    int drag_value = 0;
 };
 
 // Everything the overlay keeps between frames: what the environment asked for, what the last
@@ -152,6 +177,8 @@ struct State {
     std::uint32_t selected = 0;  // address; 0 none
     bool follow_hero = false;    // "inspect": the hero is selected, whichever moby he is now
     bool enhanced_settings = false;  // Independent Enhanced Settings window.
+    bool controls_window = false;    // the controls window (F13)
+    ControlsWindow controls;
     bool inspector = false;      // the moby inspector window is open
     bool labels = false;         // the mobys' classes written in the picture
     bool near_hero = true;       // the list holds only the mobys within `radius` of the hero
@@ -164,7 +191,7 @@ struct State {
     bool memory_viewer = false;               // the memory viewer window is open
     std::uint32_t view_address = 0x00100000;  // the first address it shows
     bool view_words = false;                  // it shows words and floats, not bytes
-    std::array<RamCell, kCells> cells{};      // the memory map, as scan_ram last measured it
+    std::vector<RamCell> cells;               // the memory map, as scan_ram last measured it
     std::uint64_t scanned_at = ~0ull;         // the tick of that scan, divided by 25; ~0 never
     std::uint32_t used_pages = 0;             // the 4 KB pages holding data, in all the cells
 
@@ -394,7 +421,7 @@ bool menu_bar_shown();
 // port's key for it does. Defined in debug/menu_bar.cpp.
 void press(SDL_Keycode key);
 
-// Draws the menu bar: View, Graphics, Sound and Developer.
+// Draws the menu bar: View, Controls, Graphics, Sound and Developer.
 // Defined in debug/menu_bar.cpp.
 void menu_bar();
 
@@ -408,6 +435,13 @@ void change_setting(int row, int by);
 // where the level has no compatible probe data. A change is saved and marked for the window to
 // apply. Defined in debug/controls.cpp.
 void enhanced_settings_window();
+
+// Draws the controls window (s.controls_window): the running game's or the global controls, a row
+// for each of the pad's controls with what presses it and where that came from, a press captured
+// to change one, the sticks' and triggers' settings with the stick drawn as it reads, and which
+// controller each player is. Every change is written and applied at once (controls_store.h).
+// Defined in debug/controls_window.cpp.
+void controls_window();
 
 // ---- The performance capture (common/perf_capture.h) ----
 
@@ -469,7 +503,7 @@ void text_coloured(const ImVec4& colour, std::format_string<Args...> fmt, Args&&
 template <typename T>
 T read(std::uint32_t address) {
     T value{};
-    address &= 0x01FFFFFF;
+    address = openrac_guest_ram_address_for_size(address, static_cast<std::uint32_t>(s.ram.size()));
 
     if (static_cast<std::size_t>(address) + sizeof(T) <= s.ram.size()) {
         std::memcpy(&value, s.ram.data() + address, sizeof(T));

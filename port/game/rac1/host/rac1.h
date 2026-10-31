@@ -47,6 +47,11 @@ void rac1_options_frame(void);
  * header's spare moby count raised while the level loader runs. */
 void rac1_wad_decompressed(gaddr to);
 
+/* scene_actors.c: hide the scene's missing actors during the flight update (pack), then
+ * restore the list (unpack). */
+void rac1_scene_actors_pack(void);
+void rac1_scene_actors_unpack(void);
+
 /* boot.c: the level programs ParseBin loaded since the start. */
 uint32_t rac1_program_loads(void);
 
@@ -73,6 +78,11 @@ int32_t rac1_moby_slot(gaddr moby);
 int rac1_moby_gate(gaddr moby, int phase);
 void rac1_stand_in_end(void);
 int rac1_moby_eyes(const float** xyz);
+int game_rac1_expanded_ram(void);
+void game_rac1_warn_moby_grid_full(void);
+gaddr rac1_expanded_grid_base(void);
+gaddr rac1_expanded_grid_cell(unsigned x, unsigned y, int* count);
+void game_rac1_update_expanded_moby_grid(gaddr moby, uint32_t next);
 /* world.c's calls of play.c's table (game_host.h, openrac_game_play: the same names without
  * rac1_world_). */
 int rac1_world_mobys(openrac_game_moby_state* out, int max);

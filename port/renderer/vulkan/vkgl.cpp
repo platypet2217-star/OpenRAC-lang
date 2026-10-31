@@ -28,6 +28,7 @@
 
 #include "common/env.h"
 #include "common/log.h"
+#include "common/precise_wait.h"
 #include "common/stats.h"
 #include "renderer/gpu_draw.h"
 #include "renderer/vulkan/vkgl_internal.h"
@@ -317,6 +318,7 @@ void present() {
         return;
     }
     const Clock::time_point start = Clock::now();
+    queue_after_previous();
     bool shown = false;
     if (g->window != nullptr) {
         int w = 0, h = 0;
@@ -355,7 +357,12 @@ int set_swap_interval(int interval) {
         return interval;
     }
     const VkPresentModeKHR mode = present_mode();
+    g->shows_at_once = mode == VK_PRESENT_MODE_IMMEDIATE_KHR;
     return mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? -1 : mode == VK_PRESENT_MODE_FIFO_KHR ? 1 : 0;
+}
+
+bool swap_shows_at_once() {
+    return active() && g->shows_at_once;
 }
 
 void set_low_latency(bool on) {
@@ -363,7 +370,46 @@ void set_low_latency(bool on) {
         return;
     }
     g->low_latency = on;
+    g->latency = {};  // the times are measured again from the first low-latency frame
     g->swapchain_stale = true;
+}
+
+namespace {
+
+// A frame the low-latency frames' sleep is for: not one whose graphics have begun already, which
+// waited for the frame before it then.
+bool latency_frame() {
+    return active() && g->low_latency && !g->latency.marked && g->frame_pending;
+}
+
+}  // namespace
+
+double latency_sleep(std::chrono::steady_clock::time_point limit) {
+    if (!latency_frame()) {
+        return 0.0;
+    }
+    const double delay = g->latency.sleep.delay();
+    const Clock::time_point start = Clock::now();
+    const Clock::time_point until = std::min(
+        limit,
+        start + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(delay))
+    );
+    if (delay <= 0.0 || until <= start) {
+        return 0.0;
+    }
+    const stats::Scope sleep("latency sleep");
+    precise_wait::until(until);
+    return seconds_since(start);
+}
+
+void latency_begin(double slept) {
+    if (!latency_frame()) {
+        return;
+    }
+    g->latency.began = Clock::now();
+    g->latency.marked = true;
+    g->latency.slept = slept;
+    g->latency.waited = g->measures.wait_s;
 }
 
 const std::string& device_name() {

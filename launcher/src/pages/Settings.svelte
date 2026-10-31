@@ -10,6 +10,7 @@
     api,
     errorText,
     onAndroid,
+    relaunchApp,
     updateBranchOf,
     updateChannelOf,
     updateSourceOf,
@@ -22,7 +23,7 @@
   import { DISCORD_URL, PYTHON_URL, REPO_URL, SITE_URL } from "$lib/links";
   import { nameProblem } from "$lib/multiplayerName";
   import { applyPalette, PALETTES } from "$lib/palettes";
-  import { devBranches } from "$lib/updates";
+  import { channelName, devBranches } from "$lib/updates";
   import { tablist } from "$lib/tabs";
   import { i18n } from '../lib/i18n/i18n';
 
@@ -51,6 +52,7 @@
     "updateBranch",
     "detailedGameLog",
     "renderer",
+    "safeRendering",
     "saveEditorAdvanced",
     "developer",
     "discordClientId",
@@ -80,7 +82,11 @@
   );
   /** Advanced opens by itself when something in it is on. */
   let advancedOpen = $state(
-    saved().detailedGameLog || saved().developer || saved().saveEditorAdvanced || saved().renderer === "vulkan",
+    saved().detailedGameLog ||
+      saved().developer ||
+      saved().saveEditorAdvanced ||
+      saved().renderer === "vulkan" ||
+      saved().safeRendering,
   );
 
   /** The update channel as this page has it, saved or not. */
@@ -185,6 +191,7 @@
     let customId: string | null = draft.discordClientId?.trim() ?? null;
     if (customId === "") customId = null;
     const before = app.info ? updateSourceOf(app.info, app.config).manifest : null;
+    const restart = draft.safeRendering !== saved().safeRendering;
     const written = await saveConfig({
       ...saved(),
       ...edited(draft),
@@ -206,6 +213,8 @@
       if (app.config?.checkUpdates) lookForUpdate().catch(() => undefined);
     }
     saving = false;
+    // The window's renderer is set before it opens.
+    if (restart) await relaunchApp();
     if (finish) app.page = "library";
   }
 
@@ -487,6 +496,13 @@
         </span>
         <input type="checkbox" role="switch" class="switch" bind:checked={draft.checkUpdates} />
       </label>
+      <label class="setting">
+        <span class="text">
+          <strong>Look for mod updates at start</strong>
+          <small>Once a day, for the mods you added from a link. The Mods tab still looks when you ask.</small>
+        </span>
+        <input type="checkbox" role="switch" class="switch" bind:checked={draft.checkModUpdates} />
+      </label>
       {#if app.info?.updateChannels}
         <div class="setting">
           <span class="text">
@@ -535,8 +551,10 @@
       {/if}
       <p class="dim note status">
         <button class="link" disabled={looked === "looking"} onclick={() => void checkNow()}>Check now</button>
-        {#if looked === "looking"}· Looking…{:else if looked === "found" || app.update}· {app.update?.name ??
-            "A new version"} is out.
+        {#if looked === "looking"}· Looking…{:else if app.update?.switchTo}· {channelName(app.update.switchTo)}
+          {app.update.version} can replace this build.
+          <button class="link" onclick={() => (app.showUpdateModal = true)}>Switch</button
+          >{:else if looked === "found" || app.update}· {app.update?.name ?? "A new version"} is out.
           <button class="link" onclick={() => (app.showUpdateModal = true)}>Update</button>{:else if looked === "none"}·
           You have the latest ({app.info?.version ?? ""}).{:else if looked === "failed"}· Could not check: {lookError}.{/if}
         {#if source}
@@ -546,9 +564,6 @@
           {/if}
         {/if}
       </p>
-      {#if channel === "stable" && app.info?.updates.channel}
-        <p class="dim note">This development build stays until the next release replaces it.</p>
-      {/if}
     </section>
 
     {#if !app.info?.standalone && !onAndroid}
@@ -612,6 +627,17 @@
               >
             </div>
           </div>
+        {/if}
+        {#if app.info?.platform === "linux"}
+          <!-- The launcher's own window without WebKitGTK's accelerated compositing
+               (core/src/webkit.rs); on by itself after a start that crashed. -->
+          <label class="setting">
+            <span class="text">
+              <strong>Safe rendering</strong>
+              <small>For a launcher that crashes or stays blank. No page slides. The launcher restarts.</small>
+            </span>
+            <input type="checkbox" role="switch" class="switch" bind:checked={draft.safeRendering} />
+          </label>
         {/if}
         <label class="setting">
           <span class="text">
@@ -814,10 +840,6 @@
   .status {
     padding-top: 10px;
     border-top: 1px solid var(--line);
-  }
-
-  .status + .note {
-    margin-top: 4px;
   }
 
   .dev {

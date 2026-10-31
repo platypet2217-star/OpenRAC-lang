@@ -56,6 +56,12 @@ discordRpc: boolean,
  */
 checkUpdates: boolean, 
 /**
+ * Look for newer versions of the installed mods when the launcher starts, once a day, and
+ * offer them (default true). Off, mods are checked only on the Mods tab's "Check now"; a mod
+ * is never updated without the player's click.
+ */
+checkModUpdates: boolean, 
+/**
  * Which builds the launcher updates to (update::Channel): the releases, or the newest
  * development build. Unset: the one it was built from (a release's build, the releases).
  */
@@ -91,6 +97,12 @@ detailedGameLog: boolean,
  * (src-tauri/src/android.rs).
  */
 renderer: "opengl" | "vulkan", 
+/**
+ * Linux: the launcher's own window draws without WebKitGTK's accelerated compositing mode
+ * (webkit.rs), for a graphics driver that crashes it. Turned on by the launcher itself after
+ * a start whose window crashed before it drew a click; the player may turn it off again.
+ */
+safeRendering: boolean, 
 /**
  * The Mods switch under Play on the game's page: the game loads the mods the Mods tab switched on (the
  * gameplay mods, the packs and the packed levels). Off by default: Play starts the game with no
