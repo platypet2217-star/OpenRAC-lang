@@ -10,10 +10,20 @@ import summaryFile from "../../../progress/summary.json";
 import packageFile from "../../package.json";
 import { onAndroid } from "./api";
 import { mockEnhanced } from "./mockEnhanced";
+import {
+  mockControlsCopy,
+  mockControlsReset,
+  mockControlsResetPlayer,
+  mockControlsResetPlayers,
+  mockControlsSet,
+  mockControlsView,
+} from "./mockControls";
 import type { ActionView } from "./generated/ActionView";
 import type { BuildInfo } from "./generated/BuildInfo";
 import type { Check } from "./generated/Check";
 import type { Config } from "./generated/Config";
+import type { ControlsScope } from "./generated/ControlsScope";
+import type { ControlsView } from "./generated/ControlsView";
 import type { Detected } from "./generated/Detected";
 import type { DifferenceView } from "./generated/DifferenceView";
 import type { Differences } from "./generated/Differences";
@@ -40,6 +50,7 @@ import type { SaveView } from "./generated/SaveView";
 import type { Scope } from "./generated/Scope";
 import type { Started } from "./generated/Started";
 import type { VersionStatus } from "./generated/VersionStatus";
+import type { UpdateChannel } from "./generated/UpdateChannel";
 import type { VersionView } from "./generated/VersionView";
 import type { EditorState } from "./generated/EditorState";
 import type { WriteResult } from "./generated/WriteResult";
@@ -215,6 +226,9 @@ let config: Config = {
   lastVersion: null,
   discordRpc: true,
   checkUpdates: true,
+  // ?modupdates: the mods are looked at when the launcher starts, and the lock-strafe has an update.
+  // Off otherwise, so its prompt does not cover every page of the preview.
+  checkModUpdates: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("modupdates"),
   updateChannel: null,
   updateBranch: null,
   layout: "compact",
@@ -225,6 +239,7 @@ let config: Config = {
   renderer: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("vulkan")
     ? "vulkan"
     : "opengl",
+  safeRendering: false,
   // ?mods: the Mods switch under Play is on.
   playWithMods: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("mods"),
   crashesSeen: {},
@@ -543,6 +558,7 @@ function mockEditorState(): EditorState {
     broken: [],
     packedAt: null,
     packedLevels: 0,
+    packedExpandedLevels: [],
     packedOtherVersion: false,
     carried: [],
     backups: [],
@@ -2071,10 +2087,14 @@ export async function mockCall(command: string, args: Record<string, unknown> = 
         configFile: "~/.config/dev.openrac.launcher/launcher.json",
         // ?standalone shows an installed launcher's pages: no checkout, nothing to find.
         standalone: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("standalone"),
-        updates: STABLE,
+        // ?devbuild: a development build, whose Stable channel offers the older release.
+        updates: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("devbuild")
+          ? DEV
+          : STABLE,
         updateChannels: { stable: STABLE, dev: DEV },
         // ?nocompositing: a Steam Deck's webview, without page slides.
         noCompositing: new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("nocompositing"),
+        safeRenderingAfterCrash: false,
       });
     case "get_config":
       return delay<Config>({ ...config });
@@ -2415,6 +2435,11 @@ export async function mockCall(command: string, args: Record<string, unknown> = 
             planetName: "Veldin",
             timestamp: "2026-10-09 17:01:21",
             modifiedMillis: Date.now() - 3600000,
+            // Played with mods: the mark beside the save (port/game/common/lib/mc.c).
+            mods: [
+              { id: "lock-strafe", version: "1.0.0" },
+              { id: "camera-tweaks", version: "0.3.1" },
+            ],
           },
           {
             slotIndex: 1,
@@ -2429,6 +2454,7 @@ export async function mockCall(command: string, args: Record<string, unknown> = 
             planetName: "Kerwan",
             timestamp: "2026-10-09 17:21:44",
             modifiedMillis: Date.now() - 1800000,
+            mods: null,
           },
           {
             slotIndex: 2,
@@ -2545,6 +2571,35 @@ export async function mockCall(command: string, args: Record<string, unknown> = 
       fixValues.set(key, values);
       return delay<Differences>(mockDifferences(now.game, now.version));
     }
+    case "controls_view":
+      return delay<ControlsView>(
+        mockControlsView(
+          typeof args.game === "string" ? args.game : null,
+          typeof args.player === "number" ? args.player : null,
+        ),
+      );
+    case "controls_reset_player":
+      return delay<ControlsView>(mockControlsResetPlayer(args.scope as ControlsScope, Number(args.player)));
+    case "controls_set":
+      return delay<ControlsView>(
+        mockControlsSet(
+          args.scope as ControlsScope,
+          String(args.key),
+          typeof args.value === "string" ? args.value : null,
+        ),
+      );
+    case "controls_reset":
+      return delay<ControlsView>(mockControlsReset(args.scope as ControlsScope));
+    case "controls_reset_players":
+      return delay<ControlsView>(mockControlsResetPlayers());
+    case "controls_export":
+      return delay<null>(null);
+    case "controls_import": {
+      const scope = args.scope as ControlsScope;
+      return delay<ControlsView>(mockControlsView(scope.kind === "game" ? scope.game : null));
+    }
+    case "controls_copy":
+      return delay<ControlsView>(mockControlsCopy(String(args.from), String(args.to)));
     case "read_save":
       return delay<SaveView>(
         mockSave(typeof args.serial === "string" ? args.serial : "SCES_509.16", Number(args.slot ?? 0)),
@@ -2619,17 +2674,21 @@ export async function mockCall(command: string, args: Record<string, unknown> = 
 // ---- launcher updates ----------------------------------------------------------------
 
 /** The preview's answer to "is a newer launcher out?": ?update (one is, and installs itself;
- *  with ?download only from GitHub), ?latest (none), ?offline (GitHub cannot be reached).
+ *  with ?download only from GitHub), ?latest (none), ?offline (GitHub cannot be reached); on the
+ *  other channel (SWITCHTO; ?devbuild with Stable chosen) the older release.
  *  Undefined: no switch, so the real check runs. */
-export function mockUpdate(current: string): UpdateInfo | null | Error | undefined {
+export function mockUpdate(
+  current: string,
+  switchTo: UpdateChannel | null = null,
+): UpdateInfo | null | Error | undefined {
   if (query.has("offline")) return new Error("no connection to GitHub");
   if (query.has("latest")) return null;
-  if (!query.has("update")) return undefined;
+  if (!query.has("update") && !switchTo) return undefined;
   const [major = 0, minor = 0] = current
     .replace(/^[^0-9]*/, "")
     .split(".")
     .map((n) => parseInt(n, 10) || 0);
-  const version = `${major}.${minor + 1}.0`;
+  const version = switchTo === "stable" ? `${major}.${Math.max(0, minor - 1)}.0` : `${major}.${minor + 1}.0`;
   return {
     version,
     tag: `v${version}`,
@@ -2643,6 +2702,7 @@ export function mockUpdate(current: string): UpdateInfo | null | Error | undefin
     ].join("\n"),
     publishedAt: new Date(Date.now() - 86400000).toISOString(),
     canInstallDirectly: !query.has("download"),
+    switchTo,
   };
 }
 

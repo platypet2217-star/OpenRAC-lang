@@ -19,6 +19,7 @@
 #include "common/json.h"
 #include "common/log.h"
 #include "common/profiler.h"
+#include "renderer/texture_pack.h"
 
 namespace openrac::scene {
 
@@ -34,6 +35,8 @@ const char* layer_name(Layer layer) {
             return "ties";
         case Layer::Shrubs:
             return "shrubs";
+        case Layer::Animated:
+            return "animated props";
         case Layer::Mobys:
             return "mobys";
         case Layer::Count:
@@ -44,30 +47,38 @@ const char* layer_name(Layer layer) {
 
 namespace {
 
-// A level file's path, or the mod's file in its place: the same path under LevelData::overrides
-// when the level has a mod folder and the file is there. `overridden` counts the files taken.
+// A level file's path, or a mod's file in its place: the same path under one of
+// LevelData::mod_roots, then under LevelData::overrides, when the file is there. `overridden`
+// counts the files taken.
 fs::path override_of(const fs::path& path, const LevelData& level, int* overridden) {
-    if (level.overrides.empty()) {
+    if (level.overrides.empty() && level.mod_roots.empty()) {
         return path;
     }
+    std::vector<fs::path> mods = level.mod_roots;
+    if (!level.overrides.empty()) {
+        mods.push_back(level.overrides);
+    }
+    // The path within the level: from the level's folder, or from a mod's (a mod's model names
+    // the textures beside it, and the level's it does not replace, by the same relative path).
     const fs::path normal = path.lexically_normal();
-    for (const fs::path& root :
-         {level.dir.lexically_normal(), level.overrides.lexically_normal()}) {
-        const fs::path rel = normal.lexically_relative(root);
-        if (rel.empty() || *rel.begin() == "..") {
-            continue;
-        }
+    const auto inside = [](const fs::path& rel) { return !rel.empty() && *rel.begin() != ".."; };
+    fs::path rel = normal.lexically_relative(level.dir.lexically_normal());
+    for (std::size_t i = 0; i < mods.size() && !inside(rel); ++i) {
+        rel = normal.lexically_relative(mods[i].lexically_normal());
+    }
+    if (!inside(rel)) {
+        return path;
+    }
+    for (const fs::path& root : mods) {
         std::error_code ignored;
-        if (fs::is_regular_file(level.overrides / rel, ignored)) {
+        if (fs::is_regular_file(root / rel, ignored)) {
             if (overridden != nullptr) {
                 ++*overridden;
             }
-            return (level.overrides / rel).lexically_normal();
+            return (root / rel).lexically_normal();
         }
-        // A mod's model names the level's textures it does not replace by the same relative path.
-        return (level.dir / rel).lexically_normal();
     }
-    return path;
+    return (level.dir / rel).lexically_normal();
 }
 
 int image_index(const fs::path& requested, LevelData& level) {
@@ -94,6 +105,8 @@ int image_index(const fs::path& requested, LevelData& level) {
         log::warn("texture {}: {}", key, stbi_failure_reason());
         ++level.missing_images;
     }
+    // A texture pack's picture of it (docs/port/TEXTURE_PACKS.md), at any size.
+    renderer::texture_pack::replace(image);
     bool translucent = false;
     for (std::size_t i = 3; i < image.pixels.size(); i += 4) {
         if (image.pixels[i] < 250) {
@@ -478,11 +491,23 @@ Vec3 bounds_centre(const Model& model, const Mat4& matrix) {
     );
 }
 
-bool load_level(const fs::path& dir, LevelData& out, std::string& error, const fs::path& edited) {
+bool load_level(
+    const fs::path& dir,
+    LevelData& out,
+    std::string& error,
+    const fs::path& edited,
+    const std::vector<fs::path>& mod_roots
+) {
     const profiling::Zone trace("Load level assets");
 
     out = LevelData{};
     out.dir = dir;
+    for (const fs::path& root : mod_roots) {
+        std::error_code ignored;
+        if (fs::is_directory(root, ignored)) {
+            out.mod_roots.push_back(fs::absolute(root, ignored));
+        }
+    }
     if (!edited.empty()) {
         std::error_code ignored;
         if (fs::is_directory(edited.parent_path(), ignored)) {
@@ -642,6 +667,42 @@ bool load_level(const fs::path& dir, LevelData& out, std::string& error, const f
         }
     }
 
+    // A mod's classes.json (its assets' level_NN, MODS.md section 3) adds classes, or replaces the
+    // level's of the same id, in the manifest's "classes" form; its meshes are read from the mod's
+    // folder by the same path. The last mod in the list first, so the first wins.
+    for (auto root = out.mod_roots.rbegin(); root != out.mod_roots.rend(); ++root) {
+        std::error_code ignored;
+        const fs::path file = *root / "classes.json";
+        if (!fs::is_regular_file(file, ignored)) {
+            continue;
+        }
+        json::Value added;
+        if (!json::parse_file(file.string(), added, error)) {
+            error = std::format("{}: {}", file.string(), error);
+            return false;
+        }
+        for (const auto& [family, table] : families) {
+            for (const auto& [key, cls] : added[family].members()) {
+                if (!cls["mesh"].is_string()) {
+                    error = std::format("{}: {} class {} has no mesh", file.string(), family, key);
+                    return false;
+                }
+                auto model = model_at(cls["mesh"]);
+                if (!model) {
+                    return false;
+                }
+                (*table)[std::atoi(key.c_str())] = {
+                    *model, static_cast<float>(cls["scale"].number(1.0)), false
+                };
+                if (table == &shrubs) {
+                    billboard_fades[std::atoi(key.c_str())] =
+                        static_cast<int>(cls["billboard_fade"].number(-1));
+                    fades_known = fades_known && cls["billboard_fade"].is_number();
+                }
+            }
+        }
+    }
+
     for (const auto& [id, cls] : mobys) {
         out.moby_classes[id] = {cls.model, cls.box};
     }
@@ -682,6 +743,167 @@ bool load_level(const fs::path& dir, LevelData& out, std::string& error, const f
     json::Value edits;
     if (!edited.empty() && fs::exists(edited) && !json::parse_file(edited.string(), edits, error)) {
         return false;
+    }
+    // Creator-authored spinning scenery lives in the mod folder. The retail manifests and
+    // placements do not know about this optional, mod-only stream.
+    if (!out.overrides.empty()) {
+        const fs::path animation_file = out.overrides / "animated.json";
+        std::error_code file_error;
+        if (fs::is_regular_file(animation_file, file_error)) {
+            json::Value animation;
+            if (!json::parse_file(animation_file.string(), animation, error)) {
+                return false;
+            }
+            if (animation["format"].number(-1) != 1 || !animation["objects"].is_array()) {
+                error = "animated.json must use format 1 and contain an objects array";
+                return false;
+            }
+            if (animation["objects"].items().size()
+                > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+                error = "animated.json exceeds the renderer's signed instance-count limit";
+                return false;
+            }
+            std::map<std::string, std::uint32_t> model_cache;
+            const fs::path mod_root = fs::canonical(out.overrides, file_error);
+            if (file_error) {
+                error = "cannot resolve the mod folder for animated.json";
+                return false;
+            }
+            for (const json::Value& object : animation["objects"].items()) {
+                if (!object.is_object()) {
+                    error = "animated.json objects must be objects";
+                    return false;
+                }
+                const std::string& model_uri = object["model"].string();
+                const fs::path relative(model_uri);
+                if (model_uri.empty() || relative.is_absolute() || relative.has_root_name()
+                    || std::any_of(relative.begin(), relative.end(), [](const fs::path& part) {
+                           return part == "..";
+                       })) {
+                    error = "animated object model must be a relative path inside the mod folder";
+                    return false;
+                }
+                const fs::path model_path = fs::canonical(mod_root / relative, file_error);
+                if (file_error || !fs::is_regular_file(model_path, file_error)) {
+                    error = std::format("animated object model {} is missing", model_uri);
+                    return false;
+                }
+                const fs::path contained = model_path.lexically_relative(mod_root);
+                if (contained.empty() || contained.is_absolute()
+                    || std::any_of(contained.begin(), contained.end(), [](const fs::path& part) {
+                           return part == "..";
+                       })) {
+                    error = "animated object model resolves outside the mod folder";
+                    return false;
+                }
+                std::uint32_t model_index = 0;
+                const std::string cache_key = model_path.string();
+                if (const auto found = model_cache.find(cache_key); found != model_cache.end()) {
+                    model_index = found->second;
+                } else {
+                    const auto loaded = load_model(model_path, out, error);
+                    if (!loaded) {
+                        return false;
+                    }
+                    model_index = *loaded;
+                    model_cache.emplace(cache_key, model_index);
+                }
+                const json::Value& matrix = object["matrix"];
+                if (!matrix.is_array() || matrix.items().size() != 16) {
+                    error = "animated object matrix must contain 16 numbers";
+                    return false;
+                }
+                Instance instance;
+                instance.model = model_index;
+                for (std::size_t i = 0; i < instance.matrix.size(); ++i) {
+                    const json::Value& value = matrix[i];
+                    const double number = value.number(std::numeric_limits<double>::quiet_NaN());
+                    if (!value.is_number() || !std::isfinite(number) || std::abs(number) > 1.0e6) {
+                        error = "animated object matrix contains an invalid value";
+                        return false;
+                    }
+                    instance.matrix[i] = static_cast<float>(number);
+                }
+                const json::Value& axis = object["spin_axis"];
+                if (!axis.is_array() || axis.items().size() != 3
+                    || !object["spin_speed"].is_number()) {
+                    error = "animated object needs a three-number spin_axis and spin_speed";
+                    return false;
+                }
+                Vec3 spin_axis{};
+                for (std::size_t i = 0; i < spin_axis.size(); ++i) {
+                    spin_axis[i] = static_cast<float>(
+                        axis[i].number(std::numeric_limits<double>::quiet_NaN())
+                    );
+                    if (!std::isfinite(spin_axis[i])) {
+                        error = "animated object spin_axis contains an invalid value";
+                        return false;
+                    }
+                }
+                const float axis_length = renderer::dot(spin_axis, spin_axis);
+                if (!std::isfinite(axis_length) || axis_length < 1.0e-8f) {
+                    error = "animated object spin_axis must have non-zero length";
+                    return false;
+                }
+                spin_axis = renderer::normalize(spin_axis);
+                Vec3 move_axis{};
+                const json::Value& move_axis_json = object["move_axis"];
+                if (!move_axis_json.is_null()
+                    && (!move_axis_json.is_array() || move_axis_json.items().size() != 3)) {
+                    error = "animated object move_axis must contain three numbers";
+                    return false;
+                }
+                for (std::size_t i = 0; i < move_axis.size(); ++i) {
+                    move_axis[i] =
+                        move_axis_json.is_array()
+                            ? static_cast<float>(
+                                  move_axis_json[i].number(std::numeric_limits<double>::quiet_NaN())
+                              )
+                            : 0.0f;
+                    if (!std::isfinite(move_axis[i])) {
+                        error = "animated object move_axis contains an invalid value";
+                        return false;
+                    }
+                }
+                const float move_axis_length = renderer::dot(move_axis, move_axis);
+                if (!std::isfinite(move_axis_length)) {
+                    error = "animated object move_axis contains an invalid value";
+                    return false;
+                }
+                const double move_distance = object["move_distance"].number(0.0);
+                const double move_speed = object["move_speed"].number(1.0);
+                const double move_phase = object["move_phase"].number(0.0);
+                if (!std::isfinite(move_distance) || std::abs(move_distance) > 1000000.0
+                    || !std::isfinite(move_speed) || std::abs(move_speed) > 100.0
+                    || !std::isfinite(move_phase) || std::abs(move_phase) > 1000000.0
+                    || (move_axis_length < 1.0e-8f && move_distance != 0.0)) {
+                    error = "animated object movement values are outside their supported range";
+                    return false;
+                }
+                if (move_axis_length >= 1.0e-8f) {
+                    move_axis = renderer::normalize(move_axis);
+                }
+                const double speed = object["spin_speed"].number();
+                const double phase = object["phase"].number(0.0);
+                if (!std::isfinite(speed) || std::abs(speed) > 100.0 || !std::isfinite(phase)
+                    || std::abs(phase) > 1000000.0) {
+                    error = "animated object spin_speed or phase is outside its supported range";
+                    return false;
+                }
+                auto& instances = out.instances[static_cast<std::size_t>(Layer::Animated)];
+                out.spins.push_back(
+                    {instances.size(),
+                     spin_axis,
+                     static_cast<float>(speed),
+                     static_cast<float>(phase),
+                     move_axis,
+                     static_cast<float>(move_distance),
+                     static_cast<float>(move_speed),
+                     static_cast<float>(move_phase)}
+                );
+                instances.push_back(instance);
+            }
+        }
     }
     const std::tuple<const char*, Layer, std::map<int, ClassModel>*> groups[] =
         {{"ties", Layer::Ties, &ties},
@@ -730,12 +952,11 @@ bool load_level(const fs::path& dir, LevelData& out, std::string& error, const f
             if (layer == Layer::Mobys) {
                 // Reviewed initial-state scenery. Both classes can break; no
                 // characters, crates, traffic, rotating signs or platforms.
+                // Classes and level numbers are the same on the PAL and NTSC-U discs.
                 const bool metropolis_scenery = manifest["game"].string() == "rac1"
-                                                && manifest["version"].string() == "ntsc"
                                                 && out.level == 3 && (id == 817 || id == 1827);
-                const bool orxon_lamp = manifest["game"].string() == "rac1"
-                                        && manifest["version"].string() == "ntsc" && out.level == 10
-                                        && id == 1855;
+                const bool orxon_lamp =
+                    manifest["game"].string() == "rac1" && out.level == 10 && id == 1855;
                 const auto& selection =
                     manifest["classes"]["moby"][std::to_string(id)]["bake_static"];
                 const bool emission_static =
@@ -919,7 +1140,8 @@ bool load_level(const fs::path& dir, LevelData& out, std::string& error, const f
         );
     }
     // Authored visibility is not valid after arbitrary geometry/placement edits.
-    if (out.overridden_models || edits["ties"].is_array() || edits["mobys"].is_array()) {
+    if (out.overridden_models || edits["ties"].is_array() || edits["mobys"].is_array()
+        || !out.spins.empty()) {
         out.pvs.grid.clear();
     }
     log::info(

@@ -27,6 +27,7 @@
 #include "enhanced/fsr3/fsr3.h"
 #include "enhanced/game/scripted_moby_colour.h"
 #include "enhanced/renderer/agx.h"
+#include "game/common/controls_store.h"
 #include "game/common/frontend/geometry.h"
 #include "game/common/frontend/render_worker.h"
 #include "game/common/frontend/tick_picture.h"
@@ -147,6 +148,10 @@ struct FramePresentation {
     int height = 0;         // Internal render target height.
     float aspect = 0;       // Requested picture aspect.
     float alpha = 1;        // Interpolation amount fixed at submission.
+    // The late camera latch's turn of the interpolated camera (frontend/camera_latch.h), fixed at
+    // submission: radians about the world's up axis, through the pivot.
+    float latch_yaw = 0;
+    renderer::Vec3 latch_pivot{};
     Box box{};              // Picture rectangle in the window.
 
     bool first = false;         // First displayed frame for this game tick.
@@ -178,6 +183,7 @@ struct State {
     std::unique_ptr<platform::Platform> sdl;
     std::unique_ptr<platform::Window> window;
     platform::Input input;
+    controls::Store controls;     // the player's controls files, applied to `input`
     bool capture_wanted = false;  // a mod's asking (capture_mouse)
     bool keyboard_taken = false;  // a mod took the keyboard (take_keyboard)
     std::unique_ptr<renderer::Renderer> renderer;
@@ -317,9 +323,14 @@ struct Pacing {
     // display or that display's mode changed (window_event), not by asking every so many frames.
     bool interval_stale = true;
     double cost = 0.004;                      // seconds
+    double cost_spread = 0.0;  // seconds: how much the cost moves from frame to frame, smoothed
     std::chrono::duration<double> late{0.0};  // how long after its time the tick came (set_tick)
+    // The game's work for a tick (set_tick), the longest of late, ebbing a tenth a tick: seconds.
+    double tick_work = 0.0;
     float last_alpha = -1.0f;                 // how far between ticks the last frame was drawn
-    std::chrono::steady_clock::time_point due{};  // when the frame cap lets the next frame start
+    // When the frame cap lets the next frame start, or (CapEdge::Present, cap_edge) when it is to
+    // be shown.
+    std::chrono::steady_clock::time_point due{};
     // The kept tick has not been drawn yet (the cap held its own frame back): the next frame drawn
     // is its first.
     bool first_pending = false;
@@ -420,6 +431,10 @@ gaddr light_bank_address();
 // runs: the title world (level 0 where it was not extracted), or at -2 the flight between planets
 // where it was (frontend/world.cpp).
 void use_level(int number);
+
+// Reads level `number`'s files on another thread for use_level to take when the level comes: the
+// flight between planets reads its destination's while it plays (frontend/world.cpp).
+void preload_level(int number);
 
 // The sky sprites the game drew since the last frame, as effect quads seen from `state`'s camera,
 // put first among the frame's effect quads: drawn behind everything (frontend/world.cpp).

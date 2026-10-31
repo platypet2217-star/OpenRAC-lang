@@ -499,7 +499,7 @@ void toggle_drawer() {
 }
 
 bool visible() {
-    return s.visible || s.enhanced_settings;
+    return s.visible || s.enhanced_settings || s.controls_window;
 }
 
 bool event(const SDL_Event& e) {
@@ -537,6 +537,10 @@ bool event(const SDL_Event& e) {
             case SDLK_F12:
                 s.shot_path = shot_name(s.tick);
                 return true;
+            // The controls window (debug/controls_window.cpp); the menus press it too.
+            case SDLK_F13:
+                s.controls_window = !s.controls_window;
+                return true;
             default:
                 break;
         }
@@ -555,7 +559,8 @@ bool event(const SDL_Event& e) {
             settings::save();
         }
     }
-    if (!(s.visible || s.enhanced_settings || picker_enabled() || menu_bar_shown() || s.drawer_open)
+    if (!(s.visible || s.enhanced_settings || s.controls_window || picker_enabled()
+          || menu_bar_shown() || s.drawer_open)
         || !s.initialised) {
         return false;
     }
@@ -641,12 +646,19 @@ void begin(bool first, bool held, float alpha, std::uint64_t tick_number) {
     }
 }
 
-void before_render(renderer::Renderer* renderer) {
+void before_render(renderer::Renderer* renderer, std::uint64_t frame) {
     using namespace openrac::gl;
+    // OPENRAC_HIDE_PASSES_EVERY=N: the passes are hidden in every other N frames only, so a place
+    // the hero is held at is shot with them and without them in one run (port/tools/regress/
+    // survey.py). `frame` is the tick's window frame, the trace's and OPENRAC_SHOT's number.
+    static const auto every = static_cast<std::uint64_t>(
+        std::max<std::int64_t>(0, env::integer(env::Var::HidePassesEvery, 0))
+    );
     if (renderer != nullptr && !s.hidden.empty()) {
+        const bool hide = every == 0 || (frame / every) % 2 == 1;
         for (const auto& r : renderer->renderers()) {
             if (s.hidden.contains(r->name())) {
-                r->enabled = false;
+                r->enabled = !hide;
             }
         }
     }
@@ -669,8 +681,8 @@ void draw(const Shown& shown) {
                        || capture_busy() || !mods::play_notice().empty();
     const bool drawer_out =
         s.drawer_open || s.drawer_at > 0.0f || s.shot_when_shut || s.touch_editing;
-    if (!(s.visible || s.enhanced_settings || picker_enabled() || menu_bar_shown() || badge
-          || drawer_out || !s.shot_path.empty())
+    if (!(s.visible || s.enhanced_settings || s.controls_window || picker_enabled()
+          || menu_bar_shown() || badge || drawer_out || !s.shot_path.empty())
         || shown.window == nullptr || !initialise(shown.window)) {
         return;
     }
@@ -702,6 +714,7 @@ void draw(const Shown& shown) {
         menu_bar();
     }
     enhanced_settings_window();
+    controls_window();
     if (s.visible) {
         panel(shown);
         inspector_window();

@@ -40,6 +40,10 @@ pub struct Config {
     /// Look for a new launcher when it starts (default true). Off, it looks only when asked
     /// (Settings, "Check now"); an update is never installed without the player's click.
     pub check_updates: bool,
+    /// Look for newer versions of the installed mods when the launcher starts, once a day, and
+    /// offer them (default true). Off, mods are checked only on the Mods tab's "Check now"; a mod
+    /// is never updated without the player's click.
+    pub check_mod_updates: bool,
     /// Which builds the launcher updates to (update::Channel): the releases, or the newest
     /// development build. Unset: the one it was built from (a release's build, the releases).
     pub update_channel: Option<crate::update::Channel>,
@@ -64,6 +68,10 @@ pub struct Config {
     /// (src-tauri/src/android.rs).
     #[ts(type = "\"opengl\" | \"vulkan\"")]
     pub renderer: String,
+    /// Linux: the launcher's own window draws without WebKitGTK's accelerated compositing mode
+    /// (webkit.rs), for a graphics driver that crashes it. Turned on by the launcher itself after
+    /// a start whose window crashed before it drew a click; the player may turn it off again.
+    pub safe_rendering: bool,
     /// The Mods switch under Play on the game's page: the game loads the mods the Mods tab switched on (the
     /// gameplay mods, the packs and the packed levels). Off by default: Play starts the game with no
     /// mods at all (`--no-mods`, docs/port/MODS.md). It took the place of Settings' Purist mode.
@@ -102,6 +110,7 @@ impl Default for Config {
             last_version: None,
             discord_rpc: true,
             check_updates: true,
+            check_mod_updates: true,
             update_channel: None,
             update_branch: None,
             discord_client_id: None,
@@ -109,6 +118,7 @@ impl Default for Config {
             theme: "openrac".into(),
             detailed_game_log: false,
             renderer: "opengl".into(),
+            safe_rendering: false,
             play_with_mods: false,
             crashes_seen: BTreeMap::new(),
             disc_choice: BTreeMap::new(),
@@ -182,6 +192,18 @@ mod tests {
         save(&path, &Config { check_updates: false, ..Config::default() }).unwrap();
         assert!(!load(&path).check_updates);
         assert!(std::fs::read_to_string(&path).unwrap().contains("\"checkUpdates\": false"));
+    }
+
+    /// A settings file from before the mod check offers mod updates; turning it off is kept.
+    #[test]
+    fn checks_for_mod_updates_unless_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        std::fs::write(&path, r#"{"setupComplete": true}"#).unwrap();
+        assert!(load(&path).check_mod_updates);
+        save(&path, &Config { check_mod_updates: false, ..Config::default() }).unwrap();
+        assert!(!load(&path).check_mod_updates);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\"checkModUpdates\": false"));
     }
 
     /// A settings file from before the renderer choice draws with OpenGL; Vulkan, chosen, is kept.

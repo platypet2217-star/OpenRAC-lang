@@ -77,6 +77,7 @@ add_library(openrac_common STATIC
   common/log.cpp
   common/parallel.cpp
   common/perf_capture.cpp
+  common/precise_wait.cpp
   common/profiler.cpp
   common/process.cpp
   common/ps2_float.cpp
@@ -111,15 +112,21 @@ openrac_add_test(perf_capture LIBS openrac_common)
 openrac_add_test(zip_writer LIBS openrac_common)
 openrac_add_test(parallel LIBS openrac_common Threads::Threads)
 openrac_add_test(slow_cpu LIBS openrac_common)
+openrac_add_test(precise_wait LIBS openrac_common)
 openrac_add_test(sampler LIBS openrac_common)
 openrac_add_test(result INCLUDES .)
 openrac_add_test(c_boundary LIBS openrac_common)
 openrac_add_test(frame_pacing INCLUDES .)
+openrac_add_test(latency_sleep INCLUDES .)
+openrac_add_test(swapchain_images INCLUDES .)
 openrac_add_test(frame_counter INCLUDES .)
 openrac_add_test(render_worker SOURCES tests/render_worker_test.cpp
   game/common/frontend/render_worker.cpp INCLUDES . LIBS openrac_common Threads::Threads)
 openrac_add_test(settings SOURCES tests/settings_test.cpp game/common/settings.cpp
                           LIBS openrac_common)
+# Texture packs: names by hash, replacement, the dump (renderer/texture_pack.h).
+openrac_add_test(texture_pack SOURCES tests/texture_pack_test.cpp renderer/texture_pack.cpp
+                              INCLUDES . LIBS openrac_common)
 # The launcher's colours for the options drawer (game/common/ui_colors.h).
 openrac_add_test(ui_colors SOURCES tests/ui_colors_test.cpp game/common/ui_colors.cpp
                            INCLUDES . LIBS openrac_common)
@@ -175,6 +182,7 @@ endif()
 openrac_warnings(openrac_runtime)
 
 openrac_add_test(runtime SOURCES tests/runtime_test.cpp tests/guest_c.c LIBS openrac_runtime)
+openrac_add_test(expanded_memory SOURCES tests/expanded_memory_test.cpp LIBS openrac_runtime)
 # The C entry point to the OPENRAC_* table (openrac/host_env.h), from C.
 openrac_add_c_test(host_env LIBS openrac_runtime)
 
@@ -318,6 +326,10 @@ openrac_add_c_test(pose_anim MATH)
 
 # The shared rac1 host C's bigger moby pool, with PAL's table and the same stand-in.
 openrac_add_c_test(moby_pool NO_STRICT_ALIASING WRAPV
+  INCLUDES tests/rac1_host game/common/include runtime/include game/rac1-pal/host)
+
+# The mod-only spatial hash: tombstones must keep probe chains intact and recycle emptied cells.
+openrac_add_c_test(expanded_moby_grid NO_STRICT_ALIASING MATH
   INCLUDES tests/rac1_host game/common/include runtime/include game/rac1-pal/host)
 
 # The shared rac1 host C's level world under the pause menu (the mods' mobys made and deleted

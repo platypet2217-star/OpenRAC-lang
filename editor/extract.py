@@ -28,7 +28,7 @@ import tempfile
 import time
 
 sys.path.insert(1, str(next(p for p in Path(__file__).resolve().parents if (p / "tools/openrac_common").is_dir()) / "tools"))
-from openrac_common import files as file_ops  # noqa: E402
+from openrac_common import background, files as file_ops  # noqa: E402
 
 from disc import LEVEL_COUNT, Disc
 from formats import FormatError
@@ -82,6 +82,23 @@ def ours(path: Path, kind: str) -> None:
                 "other": "files that are not an export"}[found]
         raise FormatError(f"{path} holds {what}, not what this command writes; choose another folder",
                           code="folder-not-ours")
+
+
+def ours_packed(path: Path, version: str) -> None:
+    """Refuses to replace a non-empty directory unless it is this version's RAC1 pack."""
+    if not path.exists():
+        return
+    if not path.is_dir():
+        raise FormatError(f"{path} is not a packed-level folder; choose another folder", code="pack-folder-not-ours")
+    if not any(path.iterdir()):
+        return
+    try:
+        manifest = json.loads((path / "packed.json").read_text())
+    except (OSError, ValueError):
+        manifest = None
+    if not isinstance(manifest, dict) or manifest.get("game") != "rac1" or manifest.get("version") != version:
+        raise FormatError(f"{path} holds files that are not a RAC1 {version.upper()} packed-level export; "
+                          "choose another folder", code="pack-folder-not-ours")
 
 
 def level_schema(level_dir: Path) -> int | None:
@@ -248,19 +265,45 @@ def publish(path: Path, build, anywhere: bool = False, replace: bool = False) ->
     dest = output_path(path, anywhere, replace)
     dest.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{dest.name}-", dir=dest.parent))
+    old = None
     try:
         build(temporary)
         if dest.exists():
             old = Path(tempfile.mkdtemp(prefix=f".{dest.name}-old-", dir=dest.parent))
-            file_ops.rename(dest, old / dest.name)
-            file_ops.rename(temporary, dest)
+            backup = old / dest.name
+            file_ops.rename(dest, backup)
+            try:
+                file_ops.rename(temporary, dest)
+            except BaseException:
+                # The completed build is not published. Put the previous directory back;
+                # if the filesystem also refuses that rename, leave the backup recoverable.
+                try:
+                    if not dest.exists() and backup.exists():
+                        file_ops.rename(backup, dest)
+                except OSError:
+                    pass
+                raise
             shutil.rmtree(old)
         else:
             file_ops.rename(temporary, dest)
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)
+        if old is not None and old.exists() and not (old / dest.name).exists():
+            shutil.rmtree(old)
     return dest
+
+
+def default_jobs() -> int:
+    """How many levels are written at once: all but a few of the CPU's threads
+    (background.cpu_budget), so the computer stays usable, unless OPENRAC_EXTRACT_JOBS says
+    otherwise: a number, or "all" for every thread."""
+    wanted = os.environ.get("OPENRAC_EXTRACT_JOBS", "").strip().lower()
+    if wanted == "all":
+        return os.cpu_count() or 1
+    if wanted.isdigit() and int(wanted) > 0:
+        return int(wanted)
+    return background.cpu_budget()
 
 
 def worker_pool(jobs: int) -> Executor:
@@ -509,8 +552,8 @@ def main() -> None:
     export.add_argument("out", type=Path)
     export.add_argument("--level", type=int, action="append",
                         help="a level to export (repeatable; default: all)")
-    export.add_argument("--jobs", type=int, default=os.cpu_count() or 1,
-                        help="levels to export at once (default: one per CPU)")
+    export.add_argument("--jobs", type=int, default=default_jobs(),
+                        help="levels to export at once (default: all but a few CPU threads, or OPENRAC_EXTRACT_JOBS)")
     export.add_argument("--terrain-lod", type=int, choices=(0, 2), default=0,
                         help="terrain detail: 0 finest (default), 2 coarsest")
     export.add_argument("--split", action="store_true",
@@ -525,8 +568,8 @@ def main() -> None:
     native.add_argument("out", type=Path)
     native.add_argument("--level", type=int, action="append",
                         help="a level to export (repeatable; default: all)")
-    native.add_argument("--jobs", type=int, default=os.cpu_count() or 1,
-                        help="levels to export at once (default: one per CPU)")
+    native.add_argument("--jobs", type=int, default=default_jobs(),
+                        help="levels to export at once (default: all but a few CPU threads, or OPENRAC_EXTRACT_JOBS)")
     native.add_argument("--terrain-lod", type=int, choices=(0, 2), default=0,
                         help="terrain detail: 0 finest (default), 2 coarsest")
     native.add_argument("--replace", action="store_true",
@@ -546,6 +589,9 @@ def main() -> None:
     dump.add_argument("out", type=Path)
     dump.add_argument("--level", type=int, required=True, action="append")
     args = parser.parse_args()
+    if args.command in ("godot", "port"):
+        # Whatever the player does comes first; the levels' processes have the rest of the CPU.
+        background.lower_priority()
     try:
         with Disc(args.iso) as disc:
             later = wads.identify(disc)
@@ -603,9 +649,26 @@ def main() -> None:
                     if game != "rac1":
                         raise FormatError(f"{args.project} holds {game}'s levels, which are not packed back yet",
                                           code="game-not-packable")
-                levels, mobys = pack(disc, survey, args.project, dest)
-                print((dest / "changes.txt").read_text(), end="")
-                print(f"Packed {levels} level(s), {mobys} moby edit(s): {dest}")
+                ours_packed(dest, disc.version.key)
+                # Build beside the published pack. An unsupported Godot edit must not leave a
+                # half pack behind or replace the last good one: pack.py records such edits in
+                # changes.txt so authors can see exactly what needs attention.
+                result = {}
+
+                def build_pack(directory: Path) -> None:
+                    levels, mobys = pack(disc, survey, args.project, directory)
+                    report = (directory / "changes.txt").read_text()
+                    incomplete = [line.strip() for line in report.splitlines()
+                                  if line.lstrip().startswith("not packed:")]
+                    if incomplete:
+                        details = "\n".join(f"  {line}" for line in incomplete)
+                        raise FormatError("Some Godot edits could not be packed:\n" + details,
+                                          code="pack-incomplete")
+                    result.update(levels=levels, mobys=mobys, report=report)
+
+                dest = publish(dest, build_pack, args.anywhere, replace=True)
+                print(result["report"], end="")
+                print(f"Packed {result['levels']} level(s), {result['mobys']} moby edit(s): {dest}")
                 say_output(dest)
             else:
                 dest = publish(args.out, lambda out: raw(disc, survey, args.level[0], out))

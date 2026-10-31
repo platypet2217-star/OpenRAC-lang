@@ -28,6 +28,11 @@ constexpr std::int64_t kFrameFillLines = 400;
 
 // A frame buffer is read back as a texture only in a colour format; an indexed texture (PSMT8,
 // PSMT4) at the same address is a texture of its own that the game pages in there.
+// The first pixel at or after a 12.4 position: the chip samples a pixel at its integer coordinates.
+std::int64_t ceil16(std::int64_t v) {
+    return v >= 0 ? (v + 15) / 16 : -((-v) / 16);
+}
+
 bool is_colour_format(std::uint8_t psm) {
     return psm == 0x00 || psm == 0x01 || psm == 0x02 || psm == 0x0A;
 }
@@ -1152,7 +1157,6 @@ bool GifInterpreter::covers_no_pixel(std::initializer_list<const GsVertex*> corn
         y_hi = std::max(y_hi, y);
     }
     // The samples in [lo, hi) of 16ths of a pixel: from ceil(lo / 16) to ceil(hi / 16) - 1.
-    auto ceil16 = [](std::int64_t v) { return v >= 0 ? (v + 15) / 16 : -((-v) / 16); };
     std::int64_t sx0 = c.scissor.x0;
     std::int64_t sx1 = c.scissor.x1;
     // On a target wider than the picture with the HUD at its sides, a scissor of the screen's whole
@@ -1255,6 +1259,32 @@ void GifInterpreter::emit_sprite(const GsVertex& a, const GsVertex& b) {
     // (a sprite has no perspective).
     DirectVertex p = convert(a);
     DirectVertex q = convert(b);
+    if (!attributes().tme && offscreen_target() == 0) {
+        // A plain fill that covers the screen's last column or line (the chip fills a pixel from
+        // ceil(x0) to ceil(x1) - 1) goes on to the screen's edge. The game's fills and fades run
+        // from -0.5 to 511.5; drawn there, the last half pixel of the right and bottom was never
+        // filled, and a fade left the old picture showing in a line along them (before the
+        // captions on black). Only those edges move, so nothing inside the screen shifts.
+        const std::int64_t ofx = context().xyoffset.ofx;
+        const std::int64_t ofy = context().xyoffset.ofy;
+        const std::int64_t width = 2 * (2048 - ofx / 16);
+        const std::int64_t height = 2 * (2048 - ofy / 16);
+        auto to_edge = [&](GsVertex v) {
+            if (ceil16(static_cast<std::int64_t>(v.x) - ofx) >= width) {
+                v.x = static_cast<decltype(v.x)>(ofx + width * 16);
+            }
+            if (ceil16(static_cast<std::int64_t>(v.y) - ofy) >= height) {
+                v.y = static_cast<decltype(v.y)>(ofy + height * 16);
+            }
+            return convert(v);
+        };
+        const DirectVertex ep = to_edge(a);
+        const DirectVertex eq = to_edge(b);
+        p.x = ep.x;
+        p.y = ep.y;
+        q.x = eq.x;
+        q.y = eq.y;
+    }
     const float s0 = p.s / p.q;
     const float t0 = p.t / p.q;
     const float s1 = q.s / q.q;
@@ -1380,6 +1410,15 @@ GlBlend translate_blend(const gs::Alpha& alpha) {
     int dst_sign = 1;
     term(ks, ms, out.src, src_sign);
     term(kd, md, out.dst, dst_sign);
+    // Cs weighed by As or by a FIX above 1, Cd not weighed: the shader weighs Cs (SourceScale).
+    if ((ks == 1 || ks == -1) && ms == 0 && kd == 0
+        && (alpha.c == 0 || (alpha.c == 2 && alpha.fix > 0x80))) {
+        out.src = GL_ONE;
+        out.source_scale = alpha.c == 0 ? SourceScale::Alpha : SourceScale::Fix;
+        out.fix = static_cast<float>(alpha.fix) / 128.0f;
+    } else if (alpha.c == 2 && alpha.fix > 0x80 && (ks != 0 || kd != 0)) {
+        out.exact = false;  // a FIX above 1 that weighs Cd too: GL's constant stops at 1
+    }
     if (src_sign > 0 && dst_sign > 0) {
         out.equation = GL_FUNC_ADD;
     } else if (src_sign < 0 && dst_sign > 0) {
@@ -1434,9 +1473,12 @@ bool DirectRenderer::init(RenderState& state, std::string& error) {
     m_uniforms.alpha_test = m_shader.uniform("alpha_test");
     m_uniforms.alpha_ref = m_shader.uniform("alpha_ref");
     m_uniforms.alpha_keep_failing = m_shader.uniform("alpha_keep_failing");
+    m_uniforms.multisampled = m_shader.uniform("multisampled");
     m_uniforms.distance_field = m_shader.uniform("distance_field");
     m_uniforms.tex_T1 = m_shader.uniform("tex_T1");
     m_uniforms.pixel_offset = m_shader.uniform("pixel_offset");
+    m_uniforms.source_scale = m_shader.uniform("source_scale");
+    m_uniforms.source_fix = m_shader.uniform("source_fix");
 
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
@@ -1587,6 +1629,11 @@ void DirectRenderer::apply(const DirectState& s, RenderState& render_state) {
         glUniform2f(m_uniforms.pixel_offset, 0.5f / static_cast<float>(std::max(render_state.target.width, 1)),
                     -0.5f / static_cast<float>(std::max(render_state.target.height, 1)));
     }
+    // Off-screen targets have one sample a pixel; the frame has several when it has a resolve target.
+    glUniform1i(
+        m_uniforms.multisampled,
+        s.target == 0 && render_state.target.resolve_framebuffer != 0 ? 1 : 0
+    );
     glUniform1i(m_uniforms.textured, s.textured ? 1 : 0);
     if (s.textured) {
         glActiveTexture(GL_TEXTURE0);
@@ -1673,8 +1720,11 @@ void DirectRenderer::apply(const DirectState& s, RenderState& render_state) {
         // The chip writes the source alpha as it is; it never blends alpha.
         glBlendFuncSeparate(b.src, b.dst, GL_ONE, GL_ZERO);
         glBlendColor(0.0f, 0.0f, 0.0f, b.constant);
+        glUniform1i(m_uniforms.source_scale, static_cast<GLint>(b.source_scale));
+        glUniform1f(m_uniforms.source_fix, b.fix);
     } else {
         glDisable(GL_BLEND);
+        glUniform1i(m_uniforms.source_scale, 0);
     }
 
     if (!s.test.zte) {
@@ -1719,7 +1769,11 @@ void DirectRenderer::draw(const DirectDraw& d, RenderState& render_state) {
     const DirectState& s = d.state;
     if (d.mobys != 0) {
         // Mobys the game drew into this target: the frontend draws them, with the target bound;
-        // then this renderer's own state again.
+        // then this renderer's own state again. Our samplers are unbound first: they clamp, and the
+        // Pyrocitor needs its texture repeated (it was grey in the vendor's menu).
+        glBindSampler(0, 0);
+        glBindSampler(1, 0);
+        m_bound_sampler = 0xFFFFFFFF;
         if (m_frame != nullptr && m_frame->target_mobys && s.target != 0) {
             const Offscreen& o = offscreen(s.target);
             glBindFramebuffer(GL_FRAMEBUFFER, o.framebuffer);
@@ -1866,8 +1920,11 @@ void DirectRenderer::flush(RenderState& state, bool background) {
                 // What lies along one side of the picture (the black line the game draws down the
                 // screen's first column) was at the television's edge; in the middle of a wider
                 // target it would be a line through the world, and it is left out.
+                // Only what lies inside that band: with the HUD at the target's sides, plain
+                // rectangles the game moved past the edge (the Suck Cannon's gauge) are drawn.
                 constexpr float kEdge = 1.0f - 3.0f / 512.0f;
-                if (!s.textured && ((lo <= -kEdge && hi <= -kEdge) || (lo >= kEdge && hi >= kEdge))) {
+                constexpr float kOut = 1.0f + 1.0f / 512.0f;
+                if (!s.textured && ((lo >= -kOut && hi <= -kEdge) || (lo >= kEdge && hi <= kOut))) {
                     continue;
                 }
                 if (!runs.empty() && runs.back().draw == &d && runs.back().whole == whole) {

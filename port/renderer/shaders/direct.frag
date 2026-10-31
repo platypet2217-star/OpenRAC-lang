@@ -21,7 +21,10 @@ uniform vec3 fog_colour;      // 0..255
 uniform int alpha_test;       // 0 off, else TEST.ATST (2 LESS ... 7 NOTEQUAL)
 uniform float alpha_ref;      // TEST.AREF
 uniform int alpha_keep_failing;  // the second pass of the double draw
+uniform int multisampled;     // the target has more than one sample a pixel
 uniform int distance_field;   // the texture's alpha is a distance field (text drawn sharp)
+uniform int source_scale;     // the blend's weight of Cs, applied here (GlBlend): 1 As, 2 FIX
+uniform float source_fix;     // FIX / 128, unclamped
 
 layout(location = 0) out vec4 out_colour;
 
@@ -81,12 +84,22 @@ void main() {
         // Alpha and alpha-test arithmetic remain FP32.
         c.rgb = vec3(mix(mp_vec3(fog_colour), mp_vec3(c.rgb), mp_float(v_fog)));
     }
-    if (alpha_test != 0 && alpha_passes(c.a) == (alpha_keep_failing != 0)) {
+    // A pixel that fails the test writes nothing. On a multisampled target its samples are masked
+    // out instead of discarded: with discard there, Intel Arc's driver lost whole draws (menu text).
+    bool failed = alpha_test != 0 && alpha_passes(c.a) == (alpha_keep_failing != 0);
+    gl_SampleMask[0] = failed ? 0 : -1;
+    if (failed && multisampled == 0) {
         discard;
     }
     // Alpha 0x80 is 1.0 for blending.
 #ifdef OPENRAC_EFFECT_MATERIAL
     c.rgb = effect_material(c.rgb / 255.0) * 255.0;
 #endif
+    // Weights above 1 (As or FIX up to 0xFF) that GL's blend factors would clamp.
+    if (source_scale == 1) {
+        c.rgb = min(c.rgb * c.a / 128.0, 255.0);
+    } else if (source_scale == 2) {
+        c.rgb = min(c.rgb * source_fix, 255.0);
+    }
     out_colour = vec4(c.rgb / 255.0, c.a / 128.0);
 }

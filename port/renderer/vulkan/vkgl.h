@@ -301,10 +301,26 @@ void present();
 // Returns what the screen allows: the nearest of those.
 int set_swap_interval(int interval);
 
-// Low-latency frames: as few swapchain images as the surface allows (at least two) and a frame
-// begun only once the one before it is done on the GPU, so that fewer finished frames wait to be
-// shown. Off: one more image than the surface needs (at least three) and two frames in flight.
+// Whether a swap that does not wait for a refresh is shown at once (the immediate present mode),
+// rather than at the next refresh as the latest image (mailbox, as Android's only is).
+bool swap_shows_at_once();
+
+// Low-latency frames: as few swapchain images as the display allows at full rate
+// (swapchain_images.h) and a frame queued only once the one before it is done on the GPU, so that
+// fewer finished frames wait to be shown. Off: one more image than the surface needs (at least
+// three) and two frames in flight.
 void set_low_latency(bool on);
+
+// With low-latency frames, called by the window's thread before a frame begins, before it reads
+// the time it is drawn for and the input: sleeps until the frame, begun then, would be queued just
+// as the GPU is free for it (latency_sleep.h), never past `limit`. Returns the seconds slept.
+double latency_sleep(std::chrono::steady_clock::time_point limit);
+
+// With low-latency frames, as a frame begins (after its latency_sleep, if any, which slept
+// `slept` seconds): notes when. A frame that is noted is recorded while the one before it is
+// still on the GPU, and waits for it only as it is queued; one that is not (or one before the CPU
+// and GPU times are known, or without GPU timestamps) waits as its recording begins, as before.
+void latency_begin(double slept);
 
 // The device and driver, for the log: "Adreno (TM) 740", "Qualcomm 512.744.0", "1.3.284".
 const std::string& device_name();

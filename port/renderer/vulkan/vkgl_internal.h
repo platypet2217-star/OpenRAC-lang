@@ -39,6 +39,7 @@
 #include "common/stats.h"
 #include "renderer/gl.h"
 #include "renderer/gpu_draw.h"
+#include "renderer/vulkan/latency_sleep.h"
 #include "renderer/vulkan/shader_compiler.h"
 #include "renderer/vulkan/spirv_cache_file.h"
 #include "renderer/vulkan/vkgl.h"
@@ -1005,9 +1006,27 @@ struct Context {
     // there): a new one is made from the window SDL holds before the next frame is shown.
     std::atomic<bool> surface_lost{false};
     int interval = 1;  // -1 adaptive, 0 immediate, 1 vsync
-    // The player's low-latency frames (set_low_latency): the fewest swapchain images, and one
-    // frame at a time on the GPU.
+    // The present mode shows each image at once (immediate), not at the next refresh (mailbox,
+    // FIFO latest ready, FIFO): what swap_shows_at_once answers.
+    bool shows_at_once = false;
+    // The player's low-latency frames (set_low_latency): the fewest swapchain images the display
+    // lets frames come at its rate with (swapchain_images.h), and one frame at a time on the GPU.
     bool low_latency = false;
+
+    // Their sleep (latency_sleep): the times it is worked out from, and the frame being drawn's
+    // beginning. `marked`: the frontend said when this frame began (latency_begin), so that its
+    // wait for the frame before it is left to its queueing (present) instead of its first graphics
+    // call (prepare_frame); `deferred`: prepare_frame left it so. `slept`: what it slept before it
+    // began; `waited`: Measures::wait_s then, the waits before it that are not its own.
+    struct Latency {
+        LatencySleep sleep;
+        Clock::time_point began{};
+        bool marked = false;
+        bool deferred = false;
+        double slept = 0.0;
+        double waited = 0.0;
+    } latency;
+
     VkFormat depth_format = VK_FORMAT_UNDEFINED;
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
     StaticMemory static_memory;  // Where a static buffer's own copy goes (vkgl_resources.cpp).
@@ -1104,6 +1123,9 @@ inline bool check(VkResult result, const char* what) {
 
 // Reclaims the selected slot before its first resource or command-buffer use.
 void prepare_frame();
+// Low-latency frames, as the frame is queued (present): the wait for the frame before it that
+// prepare_frame left (Latency::deferred), and the frame's times for the sleep before the next.
+void queue_after_previous();
 
 // The frame slot being recorded; its first use may wait for the previous GPU submission.
 inline Frame& frame() {

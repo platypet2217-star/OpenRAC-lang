@@ -17,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <future>
 #include <memory>
 #include <span>
 #include <string>
@@ -33,9 +34,11 @@
 #include "enhanced/renderer/water.h"
 #include "enhanced/viewer/scene_lighting.h"
 #include "frontend.h"
+#include "game/common/frontend/draw_coverage.h"
 #include "game/common/frontend/effects_dump.h"
 #include "game/common/frontend/geometry.h"
 #include "game/common/frontend/state.h"
+#include "game/common/mods.h"
 #include "game/common/particle_texture_cache.h"
 #include "openrac/game_host.h"
 #include "openrac/guest.h"
@@ -65,7 +68,84 @@ constexpr std::uint32_t kSkyTextureKey = 0x20000;
 // Where the effect quads' textures are placed (effect_textures), past the particles' (0x30000).
 constexpr std::uint32_t kEffectTextureKey = 0x40000;
 
+// A level's files read on another thread before the level comes (preload_level), for use_level
+// to take instead of reading them itself.
+struct Preload {
+    struct Read {
+        bool ok = false;
+        scene::LevelData level;
+        std::string error;
+    };
+
+    int level = -1;
+    unsigned generation = 0;
+    std::future<Read> read;
+};
+
+Preload g_preload;
+
+// Where a level's files are read from: its folder, a mod's edited placements, the mods' assets.
+struct LevelSources {
+    std::filesystem::path dir;
+    std::filesystem::path edited;
+    std::vector<std::filesystem::path> mod_roots;
+};
+
+LevelSources level_sources(int wanted) {
+    LevelSources sources;
+    sources.dir = g->levels / std::format("level_{:02d}", wanted);
+    // An edited level's scenery (--mods): the editor's pack writes it beside its gameplay file.
+    if (openrac_game_mods_dir != nullptr) {
+        sources.edited = std::filesystem::path(openrac_game_mods_dir)
+                         / std::format("level_{:02d}", wanted) / "placements.json";
+    }
+    // The loaded mods' assets for this level (MODS.md, section 3), searched before its own files.
+    for (const std::filesystem::path& root : mods::asset_roots()) {
+        sources.mod_roots.push_back(root / std::format("level_{:02d}", wanted));
+    }
+    return sources;
+}
+
+// Reads level `wanted` into g->level: the files read ahead for it (preload_level), waited for if
+// they are still being read, or else read now.
+bool read_level(int wanted, const LevelSources& sources, std::string& error) {
+    if (g_preload.read.valid() && g_preload.level == wanted
+        && g_preload.generation == openrac_game_mods_generation) {
+        Preload::Read read = g_preload.read.get();
+        g_preload.level = -1;
+        if (read.level.dir == sources.dir) {
+            g->level = std::move(read.level);
+            error = std::move(read.error);
+            return read.ok;
+        }
+    }
+    return scene::load_level(sources.dir, g->level, error, sources.edited, sources.mod_roots);
+}
+
 }  // namespace
+
+// Starts reading level `number`'s files on another thread, for when the game goes there (the
+// flight between planets, whose few seconds would otherwise be followed by the whole read, the
+// game stopped and its sound running ahead). Nothing for a level drawn or read ahead already.
+void preload_level(int number) {
+    if (!g || number < 0 || number == g->loaded || !g->profile->has_levels()) {
+        return;
+    }
+    if (g_preload.level == number && g_preload.generation == openrac_game_mods_generation) {
+        return;
+    }
+    // A read of another level still under way is waited for here (its future ends with it).
+    g_preload.level = number;
+    g_preload.generation = openrac_game_mods_generation;
+    log::info("reading level {} ahead", number);
+    g_preload.read = std::async(std::launch::async, [sources = level_sources(number)] {
+        Preload::Read read;
+        read.ok = scene::load_level(
+            sources.dir, read.level, read.error, sources.edited, sources.mod_roots
+        );
+        return read;
+    });
+}
 
 // The directional light bank, in the executable's terms (relocated to the loaded program's copy).
 gaddr light_bank_address() {
@@ -112,20 +192,16 @@ void use_level(int number) {
     g->level = scene::LevelData();
     g->picker.clear();
     std::string error;
-    const auto dir = g->levels / std::format("level_{:02d}", wanted);
-    // An edited level's scenery (--mods): the editor's pack writes it beside its gameplay file.
-    std::filesystem::path edited;
-    if (openrac_game_mods_dir != nullptr) {
-        edited = std::filesystem::path(openrac_game_mods_dir) / std::format("level_{:02d}", wanted)
-                 / "placements.json";
-    }
+    const LevelSources sources = level_sources(wanted);
+    const auto& dir = sources.dir;
     debug_overlay::notice({});
     // Only Ratchet & Clank's levels are extracted for the port so far (its profile says so). The
     // other games (Going Commando, Up Your Arsenal, Deadlocked at their menus) have no scenery to
     // read: their whole picture is the 2D path, both its parts, and nothing is missing to tell the
     // player about.
     const bool has_levels = g->profile->has_levels();
-    if (!has_levels && !scene::load_level(dir, g->level, error, edited)) {
+    const bool read = read_level(wanted, sources, error);
+    if (!has_levels && !read) {
         log::info(
             "level {}: no scenery for this game yet ({}); the 2D path is drawn alone", wanted, error
         );
@@ -142,13 +218,17 @@ void use_level(int number) {
         }
         return;
     }
-    if (has_levels && !scene::load_level(dir, g->level, error, edited)) {
+    if (has_levels && !read) {
         log::warn("level {}: {} (extract it with editor/extract.py port)", wanted, error);
         // Said in the picture: the game goes on, its HUD over a black world, and a player takes
         // that for the game being broken.
         debug_overlay::notice(
-            "This level's scenery could not be read, so the world is black.\n"
-            "Close the game and run \"Check the levels\" in the launcher (the log says which file)."
+            std::format(
+                "This level's scenery could not be read, so the world is black.\n{}\n"
+                "Close the game and run \"Check the levels\" in the launcher (the log says which "
+                "file).",
+                error
+            )
         );
         g->renderer->add(
             std::make_unique<renderer::DirectRenderer>(
@@ -220,8 +300,8 @@ void use_level(int number) {
                 "effects",
                 renderer::EffectPart::Rest,
                 renderer::Bucket::Particles,
-                wanted == 1 && g->game == "rac1-ntsc" ? enhanced::make_water(g->scene, dir)
-                                                      : nullptr
+                wanted == 1 && g->game.starts_with("rac1-") ? enhanced::make_water(g->scene, dir)
+                                                            : nullptr
             ),
             error
         )
@@ -624,9 +704,60 @@ std::uint32_t particle_texture(
     return key;
 }
 
+// The update a particle record's type byte picks (GameProfile::particle_updates): its address and
+// name, "?" for a game without the table.
+std::string particle_update(std::span<const std::uint8_t> ram, unsigned type) {
+    const gaddr table = g->profile->particle_updates();
+    if (table == 0) {
+        return "?";
+    }
+    const gaddr at = (OPENRAC_DATA(table) + 4u * type) & 0x01FFFFFFu;
+    if (at + 4 > ram.size()) {
+        return "?";
+    }
+    std::uint32_t fn;
+    std::memcpy(&fn, ram.data() + at, 4);
+    const char* name = openrac_guest_function_name(fn);
+    return std::format("{:#x} {}", fn, name != nullptr ? name : "(no C)");
+}
+
+// A particle record's depth along the view, as particle_quads culls and fades it by: z from the
+// camera to its position (`centre`; a ribbon's, kind 3, the middle of its two ends), and z and the
+// record's near and far in 1/4096 units. Outside near to far it is not drawn.
+struct ParticleDepth {
+    std::array<float, 3> centre;
+    float z;
+    int z12, near12, far12;
+
+    bool beyond() const { return z12 <= near12 || z12 >= far12; }
+};
+
+ParticleDepth particle_depth(const std::uint8_t* r, const host::GameState& state) {
+    float p1[3], p2[3];
+    std::memcpy(p1, r + 0x10, sizeof(p1));
+    std::memcpy(p2, r + 0x20, sizeof(p2));
+    std::array<float, 3> centre = {p1[0], p1[1], p1[2]};
+    if ((r[1] & 3) == 3) {
+        for (int i = 0; i < 3; ++i) {
+            centre[i] = (p1[i] + p2[i]) * 0.5f;
+        }
+    }
+    const std::array<float, 3>& cam = state.camera_position;
+    const std::array<float, 3>& fwd = state.forward;
+    const float z = (centre[0] - cam[0]) * fwd[0] + (centre[1] - cam[1]) * fwd[1]
+                    + (centre[2] - cam[2]) * fwd[2];
+    return {
+        centre,
+        z,
+        static_cast<int>(z * 4096.0f),
+        (r[9] & 0xF) << 10,
+        std::min((r[9] >> 4) << 17, 0x1F4000)
+    };
+}
+
 // Developer tools, for a diagnostics recording: the frame's particles by type, each type with the
-// update its record's type byte picks (GameProfile::particle_updates), and the records within 6
-// units of Ratchet, whole, in hex.
+// update its record's type byte picks (GameProfile::particle_updates) and how many of them are not
+// drawn, and the records within 6 units of Ratchet, whole, in hex.
 void note_particles(std::span<const std::uint8_t> ram, const host::GameState& state) {
     const host::LiveMoby* hero = nullptr;
     for (const host::LiveMoby& m : state.mobys) {
@@ -635,27 +766,26 @@ void note_particles(std::span<const std::uint8_t> ram, const host::GameState& st
             break;
         }
     }
-    const gaddr table = g->profile->particle_updates();
-    const auto callback = [&](unsigned type) -> std::string {
-        if (table == 0) {
-            return "?";
-        }
-        const gaddr at = (OPENRAC_DATA(table) + 4u * type) & 0x01FFFFFFu;
-        if (at + 4 > ram.size()) {
-            return "?";
-        }
-        std::uint32_t fn;
-        std::memcpy(&fn, ram.data() + at, 4);
-        const char* name = openrac_guest_function_name(fn);
-        return std::format("{:#x} {}", fn, name != nullptr ? name : "(no C)");
+    const auto callback = [&](unsigned type) {
+        return particle_update(ram, type);
     };
     constexpr float kNear = 6.0f;
     std::array<int, 256> counts{};
+    // Per type, those particle_quads leaves out: lines (kind 2, not drawn yet), those without a
+    // texture, and those outside the record's near and far depth.
+    std::array<int, 256> lines{}, untextured{}, beyond{};
     std::string near;
     int listed = 0;
     for (const State::Particle& p : g->particles) {
         const std::uint8_t* r = p.record.data();
         ++counts[r[0]];
+        if ((r[1] & 3) == 2) {
+            ++lines[r[0]];
+        } else if (p.pixels == 0 || p.clut == 0) {
+            ++untextured[r[0]];
+        } else if (particle_depth(r, state).beyond()) {
+            ++beyond[r[0]];
+        }
         if (hero == nullptr || listed >= 40) {
             continue;
         }
@@ -687,10 +817,14 @@ void note_particles(std::span<const std::uint8_t> ram, const host::GameState& st
             continue;
         }
         out += std::format(
-            "{}{{\"type\":{},\"count\":{},\"update\":\"{}\"}}",
+            "{}{{\"type\":{},\"count\":{},\"lines\":{},\"untextured\":{},\"beyond\":{},"
+            "\"update\":\"{}\"}}",
             first ? "" : ",",
             t,
             counts[t],
+            lines[t],
+            untextured[t],
+            beyond[t],
             callback(t)
         );
         first = false;
@@ -719,7 +853,6 @@ void particle_quads(std::span<const std::uint8_t> ram, const host::GameState& st
         return v;
     };
     const std::array<float, 3> cam = state.camera_position;
-    const std::array<float, 3> fwd = state.forward;
     const std::array<float, 3> right{-state.left[0], -state.left[1], -state.left[2]};
     const std::array<float, 3> down{-state.up[0], -state.up[1], -state.up[2]};
 
@@ -745,29 +878,35 @@ void particle_quads(std::span<const std::uint8_t> ram, const host::GameState& st
     if (effects_dump::armed()) {
         note_particles(ram, state);
     }
+    const bool covering = draw_coverage::armed();
+    // particle_update's, by type, for OPENRAC_DRAW_COVERAGE.
+    std::vector<std::string> updates(covering ? 256 : 0);
+    const auto cover = [&](const std::uint8_t* r, std::string_view reason) {
+        if (covering) {
+            if (updates[r[0]].empty()) {
+                updates[r[0]] = particle_update(ram, r[0]);
+            }
+            draw_coverage::particle(r[0], reason, updates[r[0]]);
+        }
+    };
     for (const State::Particle& p : g->particles) {
         const std::uint8_t* r = p.record.data();
         const int kind = r[1] & 3;
         if (kind == 2 || p.pixels == 0 || p.clut == 0) {
+            cover(r, kind == 2 ? "lines" : "untextured");
             continue;
         }
         std::array<float, 3> p1{f32(r + 0x10), f32(r + 0x14), f32(r + 0x18)};
         std::array<float, 3> p2{f32(r + 0x20), f32(r + 0x24), f32(r + 0x28)};
-        std::array<float, 3> centre = p1;
-        if (kind == 3) {
-            for (int i = 0; i < 3; ++i) {
-                centre[i] = (p1[i] + p2[i]) * 0.5f;
-            }
-        }
-        const float z = (centre[0] - cam[0]) * fwd[0] + (centre[1] - cam[1]) * fwd[1]
-                        + (centre[2] - cam[2]) * fwd[2];
-        const int z12 = static_cast<int>(z * 4096.0f);
-        const int near12 = (r[9] & 0xF) << 10;
-        const int far12 = std::min((r[9] >> 4) << 17, 0x1F4000);
-        if (z12 <= near12 || z12 >= far12) {
+        const ParticleDepth depth = particle_depth(r, state);
+        if (depth.beyond()) {
+            cover(r, "beyond");
             continue;
         }
-        const int fade = std::min({(far12 - z12) >> 4, z12 - near12, 0x1000});
+        cover(r, "");
+        const float z = depth.z;
+        const int fade =
+            std::min({(depth.far12 - depth.z12) >> 4, depth.z12 - depth.near12, 0x1000});
         const auto faded = [fade](std::uint32_t c) {
             return (c & 0x00FFFFFFu) | (((c >> 24) * static_cast<std::uint32_t>(fade) >> 12) << 24);
         };
@@ -807,7 +946,8 @@ void particle_quads(std::span<const std::uint8_t> ram, const host::GameState& st
             const float w1 = f32(r + 0x1C);
             const float k2 = f32(r + 0x2C);
             const float e[3] = {p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]};
-            const float m[3] = {centre[0] - cam[0], centre[1] - cam[1], centre[2] - cam[2]};
+            const float m[3] =
+                {depth.centre[0] - cam[0], depth.centre[1] - cam[1], depth.centre[2] - cam[2]};
             float n[3] =
                 {e[1] * m[2] - e[2] * m[1], e[2] * m[0] - e[0] * m[2], e[0] * m[1] - e[1] * m[0]};
             const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
@@ -889,7 +1029,7 @@ extern "C" int openrac_game_enhanced_water(void) {
     using namespace openrac;
     return c_boundary::call("openrac_game_enhanced_water", 0, [] {
         return int(
-            frontend::g && frontend::g->game == "rac1-ntsc" && frontend::g->loaded == 1
+            frontend::g && frontend::g->game.starts_with("rac1-") && frontend::g->loaded == 1
             && frontend::enhanced_graphics_available() && settings::get().enhanced_graphics
             && enhanced::water_available()
         );

@@ -21,11 +21,11 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 
 #include "common/crash.h"
 #include "common/env.h"
 #include "common/log.h"
+#include "common/precise_wait.h"
 #include "common/stats.h"
 #include "mods.h"
 #include "openrac/game_host.h"
@@ -120,6 +120,43 @@ void crash_test() {
     }
 }
 
+// A game that sends no picture for this many ticks (20 seconds) is stuck in a wait of its own that
+// never ends; a load sends none for a second or two at most.
+constexpr long kStallTicks = 1200;
+
+// The window keeps the last picture while the game sends none, so a game stuck in a wait looks
+// frozen and leaves nothing in the log (rac1: a flight between planets that never ended). Once a
+// stall, the log says so and names the host functions the wait is in, for a bug report to show
+// which wait it was (on Windows as the module and its offset, for the build's PDB).
+void report_stall(bool sent) {
+    static long undrawn = 0;
+    undrawn = sent ? 0 : undrawn + 1;
+
+    if (undrawn != kStallTicks) {
+        return;
+    }
+
+    const int level = openrac_game_loaded_overlay();
+    std::uint32_t mode = 0;
+    const bool has_mode = openrac_game_mode != nullptr && openrac_game_mode(&mode) != 0;
+    log::warn(
+        "the game has sent no picture for {} ticks (level {}, game mode {}): it waits in",
+        kStallTicks,
+        level == OPENRAC_OVERLAY_EXE ? -1 : level,
+        has_mode ? std::to_string(mode) : "-"
+    );
+
+    for (int depth = 0; depth < 14; ++depth) {
+        // A C string: openrac_host_caller leaves "?" past the stack's end.
+        char who[256] = "";
+        openrac_host_caller(depth, who, sizeof(who));
+
+        if (std::strcmp(who, "?") != 0 && who[0] != '\0') {
+            log::warn("  {}", static_cast<const char*>(who));
+        }
+    }
+}
+
 // OPENRAC_REACH=FILE: the functions without C (and the zero-filled calls) this run reached, with
 // their calls (guest.h, openrac_reach_site; port/tools/regress reach). Written at exit and every
 // 600 frames, so a run that crashes still leaves most of it.
@@ -167,6 +204,10 @@ void apply_writes() {
         at = at ? at + 1 : nullptr;
     }
 }
+
+// When the game's work for the next tick began: the end of the wait before it (the clock's epoch
+// before the first).
+std::chrono::steady_clock::time_point g_tick_resumed{};
 
 // [debug tools] The game's tick length, stretched by the overlay's slow motion (debug_overlay.h).
 std::chrono::microseconds tick_period() {
@@ -233,7 +274,7 @@ int vsync() {
     // Prepare owned CPU data before waiting; graphics and profiling storage still transfer at completion.
     if (g_window) {
         const auto* ram = runtime::Memory::get().base();
-        const std::span<const std::uint8_t> memory(ram, GUEST_RAM_SIZE);
+        const std::span<const std::uint8_t> memory(ram, runtime::Memory::get().ram_size());
 
         // Only a completed handoff may present or begin the next graphics measurement frame.
         if (!frontend::prepare_frame(memory) || !frontend::finish_render()) {
@@ -247,7 +288,17 @@ int vsync() {
     } resume;
 
     stats::begin_frame(stats::FrameKind::Tick, static_cast<std::uint64_t>(g_frame));
+    // A blank with no display list sent since the last one: the game drew nothing new into the
+    // chip, and the console's screen shows the picture it showed. Waiting on a load the game sends
+    // nothing (rac1: DoSpaceTransition's waits after the flight, the whole load once Start skipped
+    // it), and the list buffers the window would read again are the old program's, which the load
+    // writes over: drawn, they came out as flat red planes and lines over the stars. Before the
+    // game's first list there is no picture to keep.
+    static bool sent_once = false;
+    const bool sent = !g_vsync_since_kick;
+    sent_once = sent_once || sent;
     g_vsync_since_kick = true;
+    report_stall(sent || !sent_once);
     // With a window, the renderer draws the frame from the game's memory; without one, a frame is
     // only paced, at the game's frame rate.
 #ifdef OPENRAC_FRONTEND
@@ -266,7 +317,10 @@ int vsync() {
                 : g_next_frame,
             period,
             counted && now > g_next_frame ? std::chrono::duration<double>(now - g_next_frame)
-                                          : std::chrono::duration<double>(0.0)
+                                          : std::chrono::duration<double>(0.0),
+            counted && g_tick_resumed.time_since_epoch().count() != 0
+                ? std::chrono::duration<double>(now - g_tick_resumed)
+                : std::chrono::duration<double>(0.0)
         );
         const auto* ram = runtime::Memory::get().base();
         const std::uint32_t draws = g_reports_draws ? g_draws : ~0u;
@@ -278,10 +332,16 @@ int vsync() {
         const bool keep = undrawn.keep(g_reports_draws, draws, in_level);
         g_draws = 0;
 
-        if (!keep
-            && !frontend::frame(
-                std::span<const std::uint8_t>(ram, GUEST_RAM_SIZE), g_chain, draws
-            )) {
+        if (!sent && sent_once) {
+            if (!frontend::keep_picture()) {
+                leave();
+            }
+        } else if (!keep
+                   && !frontend::frame(
+                       std::span<const std::uint8_t>(ram, runtime::Memory::get().ram_size()),
+                       g_chain,
+                       draws
+                   )) {
             leave();
         }
 
@@ -449,7 +509,7 @@ int vsync() {
         if (!render_pending) {
             wait.emplace("wait");
         }
-        std::this_thread::sleep_until(g_next_frame);
+        precise_wait::until(g_next_frame);
     }
 #ifdef OPENRAC_FRONTEND
     openrac::platform::
@@ -459,12 +519,13 @@ int vsync() {
     if (g_window && !frontend::hold()) {
         leave();
     }
-    // With fresh_input, the tick about to run reads the pad as it is now: read at the last tick's
-    // end, it was the wait (and the frames drawn between ticks) old, up to a tick.
+    // With responsive_controls, the tick about to run reads the pad as it is now: read at the last
+    // tick's end, it was the wait (and the frames drawn between ticks) old, up to a tick.
     if (g_window) {
         frontend::refresh_pads();
     }
 #endif
+    g_tick_resumed = steady_clock::now();
     return static_cast<int>(g_frame & 1);
 }
 

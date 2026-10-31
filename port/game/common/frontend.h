@@ -20,6 +20,14 @@
 #include "openrac/game_host.h"
 #include "openrac/openrac_mod.h"
 
+namespace openrac::controls {
+class Store;
+}
+
+namespace openrac::platform {
+class Input;
+}
+
 namespace openrac::frontend {
 
 // Opens the window. `levels` holds the extracted levels (level_00, level_01, ...).
@@ -88,9 +96,14 @@ void savestate_restored(std::uint64_t tick);
 // reads the window's events: 1 drawn or queued, 0 none due, -1 the window was closed or rendering failed.
 // An owned Vulkan job may remain in flight when the next game tick starts.
 // `late`: how long after its time the tick came (a machine that draws slower than the game ticks):
-// frame() leaves the frames of ticks that come more than a tick late undrawn.
-void set_tick(std::chrono::steady_clock::time_point tick, std::chrono::duration<double> period,
-              std::chrono::duration<double> late = std::chrono::duration<double>(0.0));
+// frame() leaves the frames of ticks that come more than a tick late undrawn. `work`: how long
+// the game's own work for it took, from the end of the wait before it.
+void set_tick(
+    std::chrono::steady_clock::time_point tick,
+    std::chrono::duration<double> period,
+    std::chrono::duration<double> late = std::chrono::duration<double>(0.0),
+    std::chrono::duration<double> work = std::chrono::duration<double>(0.0)
+);
 bool interpolating();
 
 // The game's text lookup, asked for an id of the port's own (the rows it adds to the game's
@@ -133,11 +146,11 @@ std::int64_t since_control();
 // left sticks (x, y each).
 bool pad(int port, std::uint16_t* buttons, std::uint8_t analog[4]);
 
-// With the player's fresh_input setting, reads the pads again just before the game's next tick
-// runs (the end of program::vsync, after its wait): the tick reads the sticks and buttons as they
-// are when it starts, not as they were when the last tick ended. Nothing else of the input changes
-// (the window's events stay queued for the next frame), and the tick still reads one state of the
-// pad. Off (the default), the tick reads the pad as the last tick's end left it.
+// With the player's responsive_controls setting, reads the pads again just before the game's next
+// tick runs (the end of program::vsync, after its wait): the tick reads the sticks and buttons as
+// they are when it starts, not as they were when the last tick ended. Nothing else of the input
+// changes (the window's events stay queued for the next frame), and the tick still reads one state
+// of the pad. Off (the default), the tick reads the pad as the last tick's end left it.
 void refresh_pads();
 
 // Start skipping what plays (the skip_cutscenes setting): what Start also presses for the game's
@@ -166,6 +179,17 @@ KeyboardMouseView keyboard_mouse();
 // A mod took the keyboard: the port's own keyboard table stops pressing pad 0's buttons.
 void take_keyboard();
 
+// Reads the player's controls of `game` ("rac1") from `dir` (controls_store.h) and presses the pads
+// from them, from the next read on; the controller mappings in `dir`'s gamecontrollerdb.txt, if
+// there is one, are added to SDL's. Bindings the version's settings file held (bind_* keys, before
+// the controls had files of their own) move into the game's controls file once.
+void open_controls(const std::filesystem::path& dir, const std::string& game);
+
+// The player's controls and the input they press, for the controls window
+// (debug/controls_window.cpp); null while no window is open.
+controls::Store* controls_store();
+platform::Input* input();
+
 // A mod asks for the cursor captured (relative mouse mode) or let go. Applied each frame, and let
 // go anyway while the window is not focused or the overlay or the debug menu is open.
 void capture_mouse(bool capture);
@@ -182,6 +206,10 @@ void set_view_source(const openrac_view_source* source);
 // While the debug overlay holds the game (its pause): draws the last tick again and reads the
 // window's events until the overlay lets a tick through. False once the window was closed.
 bool hold();
+
+// A tick on which the game sent nothing to draw (program/vsync.cpp): the last tick drawn again
+// and the window's events read. False once the window was closed.
+bool keep_picture();
 
 // Current level has validated, uploaded probes and a supported renderer.
 bool enhanced_graphics_available();

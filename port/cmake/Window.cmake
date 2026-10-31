@@ -49,17 +49,31 @@ endfunction()
 # ---- platform ----
 add_library(openrac_platform STATIC
   platform/audio.cpp
+  platform/bindings.cpp
   platform/clock.cpp
+  platform/controls_file.cpp
   platform/gpu_driver.cpp
   platform/input.cpp
   platform/pad.cpp
+  platform/players.cpp
   platform/performance_hint.cpp
   platform/pump.cpp
   platform/touch_pad.cpp
   platform/window.cpp
 )
 target_link_libraries(openrac_platform PUBLIC openrac_common openrac_sdl3)
+# bindings.cpp reads the SDK's key names (sdk/include/openrac/keys.h), which the launcher, a mod's
+# keybind setting and the settings file all share.
+target_include_directories(openrac_platform PRIVATE "${PROJECT_SOURCE_DIR}/../sdk/include")
 openrac_warnings(openrac_platform)
+# What the player bound each pad button to (platform/bindings.h).
+openrac_add_test(bindings SOURCES tests/bindings_test.cpp INCLUDES . LIBS openrac_platform)
+# The controls files and the store that layers them (platform/controls_file.h,
+# game/common/controls_store.h).
+openrac_add_test(controls SOURCES tests/controls_test.cpp game/common/controls_store.cpp
+                          INCLUDES . game/common LIBS openrac_platform)
+# Which gamepad plays on which port (platform/input.h).
+openrac_add_test(input_ports SOURCES tests/input_ports_test.cpp INCLUDES . LIBS openrac_platform)
 # Android: the player's own GPU driver package (platform/gpu_driver.h, cmake/Android.cmake).
 if(ANDROID)
   target_sources(openrac_platform PRIVATE android/gpu_driver.cpp)
@@ -177,6 +191,7 @@ add_library(openrac_renderer STATIC
   renderer/shader.cpp
   renderer/subsystems.cpp
   renderer/texture.cpp
+  renderer/texture_pack.cpp
   renderer/texture_pool.cpp
 )
 openrac_embed_shaders(openrac_renderer renderer openrac::renderer
@@ -267,6 +282,7 @@ add_library(openrac_scene STATIC
   scene/shadow_draws.cpp
   scene/shadow_scroll.cpp
 )
+target_include_directories(openrac_scene PRIVATE runtime/include)
 target_link_libraries(openrac_scene PUBLIC openrac_renderer openrac_viewer_third_party
   openrac_assets_geometry)
 openrac_warnings(openrac_scene)
@@ -423,6 +439,7 @@ add_library(openrac_game_rac1_profile STATIC
   game/rac1/game_state.cpp
   game/rac1/profile.cpp
 )
+target_include_directories(openrac_game_rac1_profile PRIVATE runtime/include)
 target_link_libraries(openrac_game_rac1_profile PUBLIC openrac_scene_renderer)
 openrac_warnings(openrac_game_rac1_profile)
 openrac_add_test(camera_target LIBS openrac_game_rac1_profile)
@@ -533,6 +550,10 @@ openrac_add_test(frontend_geometry SOURCES tests/frontend_geometry_test.cpp
                  game/common/frontend/geometry.cpp INCLUDES .)
 openrac_add_test(frontend_pacing SOURCES tests/frontend_pacing_test.cpp
                  game/common/frontend/pacing.cpp INCLUDES .)
+openrac_add_test(frame_limiter SOURCES tests/frame_limiter_test.cpp
+                 game/common/frontend/pacing.cpp INCLUDES .)
+openrac_add_test(frontend_latch_fade SOURCES tests/frontend_latch_fade_test.cpp
+                 game/common/frontend/latch_fade.cpp INCLUDES .)
 
 openrac_add_test(logo SOURCES tests/logo_test.cpp renderer/ui/logo.cpp INCLUDES .)
 openrac_add_test(touch_overlay LIBS openrac_renderer_ui openrac_platform)

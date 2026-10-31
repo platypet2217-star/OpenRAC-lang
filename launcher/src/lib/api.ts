@@ -19,6 +19,8 @@ import type { BakeStatus } from "./generated/BakeStatus";
 import type { Candidate } from "./generated/Candidate";
 import type { Check } from "./generated/Check";
 import type { Config } from "./generated/Config";
+import type { ControlsScope } from "./generated/ControlsScope";
+import type { ControlsView } from "./generated/ControlsView";
 import type { Detected } from "./generated/Detected";
 import type { DifferenceKind } from "./generated/DifferenceKind";
 import type { DifferenceView } from "./generated/DifferenceView";
@@ -57,6 +59,7 @@ import type { ResetPart } from "./generated/ResetPart";
 import type { ResetPartView } from "./generated/ResetPartView";
 import type { ResetPreview } from "./generated/ResetPreview";
 import type { SaveBackupInfo } from "./generated/SaveBackupInfo";
+import type { SaveMod } from "./generated/SaveMod";
 import type { SaveChange } from "./generated/SaveChange";
 import type { SaveFields } from "./generated/SaveFields";
 import type { SaveView } from "./generated/SaveView";
@@ -94,6 +97,8 @@ export type { BakeStatus };
 export type { Candidate };
 export type { Check };
 export type { Config };
+export type { ControlsScope };
+export type { ControlsView };
 export type { Detected };
 export type { DifferenceKind };
 export type { DifferenceView };
@@ -120,6 +125,7 @@ export type { RemoteMod };
 export type { RemotePreview };
 export type { ReportEntry };
 export type { SaveBackupInfo };
+export type { SaveMod };
 export type { SaveChange };
 export type { SaveFields };
 export type { SaveView };
@@ -151,6 +157,8 @@ export interface AppInfo {
   updateChannels: Record<UpdateChannel, UpdateSource>;
   /** WebKitGTK draws without its accelerated compositing mode (a Steam Deck): no page slides. */
   noCompositing: boolean;
+  /** The last start's window crashed before it drew a click, and Safe rendering was turned on. */
+  safeRenderingAfterCrash: boolean;
 }
 
 /** The games folder looked through (scan_discs, src-tauri/src/lib.rs). */
@@ -274,6 +282,18 @@ export const api = {
   reportDelete: (game: string, file: string) => call<null>("report_delete", { game, file }),
   /** What the port does otherwise than the PS2 game, for one version (`rac1`, `pal`). */
   differences: (game: string, version: string) => call<Differences>("differences", { game, version }),
+  // The controls files (core/src/controls.rs); no page shows them yet.
+  controlsView: (game: string | null, player: number | null = null) =>
+    call<ControlsView>("controls_view", { game, player }),
+  controlsSet: (scope: ControlsScope, key: string, value: string | null) =>
+    call<ControlsView>("controls_set", { scope, key, value }),
+  controlsReset: (scope: ControlsScope) => call<ControlsView>("controls_reset", { scope }),
+  controlsResetPlayers: () => call<ControlsView>("controls_reset_players"),
+  controlsResetPlayer: (scope: ControlsScope, player: number) =>
+    call<ControlsView>("controls_reset_player", { scope, player }),
+  controlsExport: (scope: ControlsScope, path: string) => call<null>("controls_export", { scope, path }),
+  controlsImport: (scope: ControlsScope, path: string) => call<ControlsView>("controls_import", { scope, path }),
+  controlsCopy: (from: string, to: string) => call<ControlsView>("controls_copy", { from, to }),
   /** Switches a game fix on (the port's) or off (as the original plays) in the version's settings. */
   setGameFix: (game: string, version: string, id: string, on: boolean) =>
     call<Differences>("set_game_fix", { game, version, id, on }),
@@ -469,6 +489,21 @@ export async function pickFolder(title: string): Promise<string | null> {
   if (!inTauri) return null;
   const picked = await open({ directory: true, title });
   return typeof picked === "string" ? picked : null;
+}
+
+/** Linux: tells the launcher when its window has drawn the player's first click, so a start that
+ *  crashes there turns Safe rendering on at the next (core/src/webkit.rs, DrawCheck). */
+export function watchFirstDraw(): void {
+  if (!inTauri) return;
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      void invoke("webview_clicked");
+      // Two frames for the click's own draw, then time for the page slide it starts.
+      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => void invoke("webview_drew"), 1500)));
+    },
+    { once: true, capture: true },
+  );
 }
 
 /** Restart the launcher application (e.g. after installing an update). */

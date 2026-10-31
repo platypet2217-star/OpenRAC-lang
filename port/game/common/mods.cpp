@@ -27,10 +27,14 @@
 #include "mod_manifest.h"
 #include "mod_play.h"
 #include "mod_scripts.h"
+#include "openrac/game_host.h"
 #include "openrac/guest.h"
 #include "openrac/memory.h"
 #include "openrac/openrac_mod.h"
 namespace fs = std::filesystem;
+
+/* The mods loaded for this run, for lib/mc.c's save mark (game_host.h): set by load() below. */
+extern "C" const char* openrac_game_loaded_mods = "[]";
 using namespace openrac;
 
 // One loaded mod: the handle openrac_mod.h's functions are given.
@@ -141,6 +145,7 @@ const char* hook_id(const Host& host, const char* name) {
 }
 openrac_mod* g_loading = nullptr;  // the mod whose openrac_mod_load runs: hooks are taken then only
 std::vector<std::unique_ptr<openrac_mod>> g_loaded;
+std::vector<fs::path> g_asset_roots;  // the loaded mods' assets folders, the last loaded first
 std::vector<FrameCallback> g_frames;
 std::vector<PadCallback> g_pads;
 std::vector<MenuCallback> g_menus;
@@ -1002,6 +1007,23 @@ struct Outcome {
     std::vector<std::string> hooks;
 };
 
+/* The loaded mods as the JSON array lib/mc.c writes beside each save, so a save says what it was
+ * played with (openrac_game_loaded_mods, game_host.h). Built once, after loading, and kept for the
+ * run: the save path reads the pointer and never builds anything. */
+std::string g_loaded_mods_json = "[]";
+
+void set_loaded_mods_json() {
+    std::ostringstream o;
+    o << "[";
+    for (std::size_t i = 0; i < g_loaded.size(); ++i) {
+        o << (i == 0 ? "" : ", ") << "{\"id\": " << quoted(g_loaded[i]->id)
+          << ", \"version\": " << quoted(g_loaded[i]->version) << "}";
+    }
+    o << "]";
+    g_loaded_mods_json = o.str();
+    openrac_game_loaded_mods = g_loaded_mods_json.c_str();
+}
+
 void write_status(const Host& host, const std::vector<Outcome>& outcomes) {
     const fs::path folder = host.list.parent_path();
     std::error_code e;
@@ -1213,6 +1235,10 @@ bool load_one(const fs::path& folder, const Candidate& c, std::unique_ptr<openra
 
 }  // namespace
 
+const std::vector<fs::path>& asset_roots() {
+    return g_asset_roots;
+}
+
 std::string load(const Host& host) {
     if (host.purist) {
         log::info("mods: purist mode (--no-mods), none loaded");
@@ -1294,6 +1320,17 @@ std::string load(const Host& host) {
                                   return s;
                               }());
                     g_loaded.push_back(std::move(mod));
+                    // Its assets (MODS.md, section 3): searched before the levels' own files.
+                    if (!c.manifest.assets.empty()) {
+                        std::error_code e;
+                        const fs::path assets = folder / c.manifest.id / fs::path(c.manifest.assets);
+                        if (fs::is_directory(assets, e)) {
+                            g_asset_roots.insert(g_asset_roots.begin(), assets);
+                        } else {
+                            log::warn("mod {}: its assets folder {} is missing", c.manifest.id,
+                                      c.manifest.assets);
+                        }
+                    }
                 }
             }
         }
@@ -1322,6 +1359,7 @@ std::string load(const Host& host) {
         g_images.push_back({m->id.c_str(), m->version.c_str(), m->file.c_str(), m->base});
     }
     crash::set_mods(g_images.data(), static_cast<int>(g_images.size()));
+    set_loaded_mods_json();
     std::string line;
     for (const auto& m : g_loaded) {
         line += (line.empty() ? "" : ", ") + m->id + " " + m->version;
@@ -1539,6 +1577,7 @@ void reset() {
     scripts::reset();
     g_outcomes.clear();
     g_loaded.clear();
+    g_asset_roots.clear();
     g_frames.clear();
     g_pads.clear();
     g_menus.clear();

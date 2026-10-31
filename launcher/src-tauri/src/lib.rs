@@ -4,7 +4,8 @@
 // commands and events is docs/ARCHITECTURE.md's; keep them in step with
 // src/lib/api.ts and src/lib/mock.ts.
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 mod android;
 
@@ -59,6 +60,9 @@ struct AppInfo {
     /// WEBKIT_DISABLE_COMPOSITING_MODE): the page gives its page slides up, whose view transitions
     /// crashed the webview there whenever a page was opened (src/lib/motion.ts).
     no_compositing: bool,
+    /// The last start's window crashed before it drew a click, and this start turned Safe
+    /// rendering on for it (Config::safe_rendering): the page says so once.
+    safe_rendering_after_crash: bool,
 }
 
 #[derive(Serialize)]
@@ -101,6 +105,15 @@ fn chosen_update_source<R: tauri::Runtime>(
     built.chosen(channel.unwrap_or(built.kind()), branch.as_deref())
 }
 
+/// Whether SOURCE is the other channel than the one this launcher was built for: its build is then
+/// offered whatever its version (update::offered), so a development build can go back to Stable.
+fn switching_channel<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    source: &openrac_launcher_core::update::UpdateSource,
+) -> bool {
+    source.kind() != update_source(app).kind()
+}
+
 #[tauri::command]
 fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
     use openrac_launcher_core::update::Channel;
@@ -116,6 +129,7 @@ fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
         update_channels: UpdateChannels { stable: updates.on(Channel::Stable), dev: updates.on(Channel::Dev) },
         updates,
         no_compositing: cfg!(target_os = "linux") && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_some(),
+        safe_rendering_after_crash: SAFE_AFTER_CRASH.load(Ordering::Relaxed),
     }
 }
 
@@ -133,8 +147,15 @@ async fn launcher_update_check(
         use tauri_plugin_updater::UpdaterExt;
         let source = chosen_update_source(webview.app_handle(), channel, branch);
         let url = tauri::Url::parse(&source.manifest).map_err(|e| format!("{}: {e}", source.manifest))?;
-        let updater =
-            webview.updater_builder().endpoints(vec![url]).and_then(|b| b.build()).map_err(|e| e.to_string())?;
+        let mut builder = webview.updater_builder();
+        if switching_channel(webview.app_handle(), &source) {
+            // The other channel's build, also when it is older (the release a development build came after).
+            builder = builder.version_comparator(|current, release| {
+                let current = openrac_launcher_core::update::effective_version(&current.to_string(), LAUNCHER_BUILD);
+                openrac_launcher_core::update::offered(&current, &release.version.to_string(), true)
+            });
+        }
+        let updater = builder.endpoints(vec![url]).and_then(|b| b.build()).map_err(|e| e.to_string())?;
         let Some(update) = updater.check().await.map_err(|e| e.to_string())? else { return Ok(None) };
         let date = update.raw_json.get("pub_date").cloned();
         let (current_version, version, body, raw_json) =
@@ -159,6 +180,32 @@ async fn launcher_update_check(
 #[tauri::command]
 fn relaunch_app(app: AppHandle) {
     tauri::process::restart(&app.env());
+}
+
+/// The app's identifier (tauri.conf.json), which names its per-user config folder.
+#[cfg(target_os = "linux")]
+const IDENTIFIER: &str = "dev.openrac.launcher";
+
+/// This start's draw check (core webkit.rs), when it has one: Linux, Safe rendering off, and not a
+/// second start.
+static DRAW_CHECK: OnceLock<openrac_launcher_core::webkit::DrawCheck> = OnceLock::new();
+/// The player clicked in the window: a quit from now on does not end the draw check.
+static CLICKED: AtomicBool = AtomicBool::new(false);
+/// This start turned Safe rendering on, after the last one crashed (AppInfo).
+static SAFE_AFTER_CRASH: AtomicBool = AtomicBool::new(false);
+
+/// The page saw the player's first click, before it is drawn.
+#[tauri::command]
+fn webview_clicked() {
+    CLICKED.store(true, Ordering::Relaxed);
+}
+
+/// The page drew the player's first click: the window draws, and the draw check ends.
+#[tauri::command]
+fn webview_drew() {
+    if let Some(check) = DRAW_CHECK.get() {
+        check.end();
+    }
 }
 
 #[tauri::command]
@@ -479,6 +526,115 @@ async fn set_game_fix(
         launcher_log::line(&what);
     }
     result
+}
+
+// ---- The controls files (core/src/controls.rs) ----
+//
+// No page shows them yet; these are what a controls page will call. The game reads a changed
+// file within a second, so they may run while it plays.
+
+/// The controls as `game` reads them (over every game's), or every game's alone; for every player,
+/// or as `player` (0 or 1) reads them.
+#[tauri::command]
+async fn controls_view(
+    game: Option<String>,
+    player: Option<u8>,
+) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || openrac_launcher_core::controls::view(&home, game.as_deref(), player))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Sets a control, a controller setting or a player in `scope`'s file; None removes it.
+#[tauri::command]
+async fn controls_set(
+    scope: openrac_launcher_core::controls::Scope,
+    key: String,
+    value: Option<String>,
+) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    let what = format!("controls: {key} = {} ({scope:?})", value.as_deref().unwrap_or("(inherited)"));
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        openrac_launcher_core::controls::set(&home, &scope, &key, value.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if result.is_ok() {
+        launcher_log::line(&what);
+    }
+    result
+}
+
+/// Puts `scope` back to what it inherits.
+#[tauri::command]
+async fn controls_reset(
+    scope: openrac_launcher_core::controls::Scope,
+) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    let what = format!("controls: reset {scope:?}");
+    let result = tauri::async_runtime::spawn_blocking(move || openrac_launcher_core::controls::reset(&home, &scope))
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.is_ok() {
+        launcher_log::line(&what);
+    }
+    result
+}
+
+/// One player's own controls out of `scope`'s file: they read every player's again.
+#[tauri::command]
+async fn controls_reset_player(
+    scope: openrac_launcher_core::controls::Scope,
+    player: u8,
+) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || openrac_launcher_core::controls::reset_player(&home, &scope, player))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The players back to the defaults.
+#[tauri::command]
+async fn controls_reset_players() -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || openrac_launcher_core::controls::reset_players(&home))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Writes `scope`'s bindings and controller settings to a file of the player's choosing.
+#[tauri::command]
+async fn controls_export(scope: openrac_launcher_core::controls::Scope, path: String) -> Result<(), String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || {
+        openrac_launcher_core::controls::export(&home, &scope, std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Replaces `scope`'s bindings and controller settings with a file's.
+#[tauri::command]
+async fn controls_import(
+    scope: openrac_launcher_core::controls::Scope,
+    path: String,
+) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || {
+        openrac_launcher_core::controls::import(&home, &scope, std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copies one game's own controls over another's.
+#[tauri::command]
+async fn controls_copy(from: String, to: String) -> Result<openrac_launcher_core::controls::ControlsView, String> {
+    let home = openrac_launcher_core::saves::data_home();
+    tauri::async_runtime::spawn_blocking(move || openrac_launcher_core::controls::copy_game(&home, &from, &to))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ---- Logs and crash reports (core/src/reports.rs) ----
@@ -1371,15 +1527,46 @@ fn clean_appimage_env() {
     openrac_launcher_core::appimage::clean_process_env();
 }
 
+/// Whether the window draws in Safe rendering (Config::safe_rendering), read before the app
+/// exists. A last start that crashed before it drew a click turns it on, and it is saved; a start
+/// without it begins a draw check of its own (core webkit.rs).
+#[cfg(target_os = "linux")]
+fn settle_safe_rendering() -> bool {
+    use openrac_launcher_core::webkit::{self, DrawCheck, LastStart};
+    let Some(dir) = webkit::config_dir(IDENTIFIER) else { return false };
+    let file = dir.join("launcher.json");
+    let mut config = config::load(&file);
+    let check = DrawCheck::new(&dir);
+    match check.last_start() {
+        // A second start shows the first launcher's window and goes.
+        LastStart::Running => return config.safe_rendering,
+        LastStart::Crashed if !config.safe_rendering => {
+            config.safe_rendering = true;
+            let _ = config::save(&file, &config);
+            SAFE_AFTER_CRASH.store(true, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+    if config.safe_rendering {
+        // Nothing is checked: a crashed start's file has done its work.
+        check.clear();
+    } else {
+        check.begin();
+        let _ = DRAW_CHECK.set(check);
+    }
+    config.safe_rendering
+}
+
 /// What WebKitGTK needs changed on this system, before GTK starts: its
 /// DMA-BUF renderer's buffers through shared memory under Wayland with
 /// NVIDIA's own driver, and its
-/// accelerated compositing mode on a Steam Deck, where the window opens empty
-/// unless the launcher is started with WEBKIT_DISABLE_COMPOSITING_MODE=1. A
+/// accelerated compositing mode there and on a Steam Deck, where the window opens empty
+/// unless the launcher is started with WEBKIT_DISABLE_COMPOSITING_MODE=1, and wherever Safe
+/// rendering is on. A
 /// value the player set is left as it is (core/src/webkit.rs).
 #[cfg(target_os = "linux")]
-fn tune_webkit() {
-    for (name, value) in openrac_launcher_core::webkit::webkit_env() {
+fn tune_webkit(safe: bool) {
+    for (name, value) in openrac_launcher_core::webkit::webkit_env(safe) {
         if std::env::var_os(name).is_none() {
             std::env::set_var(name, value);
         }
@@ -1484,6 +1671,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             relaunch_app,
+            webview_clicked,
+            webview_drew,
             get_config,
             save_config,
             detect,
@@ -1550,6 +1739,14 @@ pub fn run() {
             open_reports_folder,
             differences,
             set_game_fix,
+            controls_view,
+            controls_set,
+            controls_reset,
+            controls_reset_players,
+            controls_reset_player,
+            controls_export,
+            controls_import,
+            controls_copy,
             android::pick_disc,
             android::pick_zip,
             android::show_files,
@@ -1566,8 +1763,16 @@ pub fn run() {
             android::game_status,
             android::game_window,
         ])
-        .run(tauri::generate_context!())
-        .expect("the launcher failed to start");
+        .build(tauri::generate_context!())
+        .expect("the launcher failed to start")
+        .run(|_, event| {
+            // A quit before any click: nothing was drawn that could have crashed.
+            if matches!(event, tauri::RunEvent::Exit) && !CLICKED.load(Ordering::Relaxed) {
+                if let Some(check) = DRAW_CHECK.get() {
+                    check.end();
+                }
+            }
+        });
 }
 
 /// What the process's environment must say before GTK and WebKit start, on Linux: the AppImage's
@@ -1576,7 +1781,7 @@ fn prepare_environment() {
     #[cfg(target_os = "linux")]
     {
         clean_appimage_env();
-        tune_webkit();
+        tune_webkit(settle_safe_rendering());
         ensure_wayland_cursor_fallback();
     }
 }
