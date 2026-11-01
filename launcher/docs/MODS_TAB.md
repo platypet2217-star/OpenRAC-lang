@@ -58,14 +58,14 @@ One panel for every kind: the player never says which kind a mod is.
 `lib/addMods.ts` sends a native or script mod to the gameplay mods and a
 texture and model pack to the packs.
 
-| Element           | Words                                                                                                 | Notes                                                                                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Title             | `T.ADD.title`                                                                                         | Browse mods (`T.ADD.browse`, opens `T.ADD.modsUrl`) beside it for Ratchet & Clank                                   |
-| Link field        | placeholder `T.ADD.linkPlaceholder`, label `T.ADD.linkLabel`, button `T.ADD.go`                       | accepts https, http, no scheme, `.git`, `/tree/<branch>/<folder>`, `/releases/tag/<v>`, `git@github.com:o/r`, `o/r` |
-| Added from before | `T.SAVED_SOURCES.label`, one button per link in `sources.json`                                        | only with a link already saved; a click fills the field and reads the repository, as typing it would                |
-| File, Folder      | `T.ADD.file`, `T.ADD.folder`; pickers `T.ADD.pickZip`, `T.ADD.pickFolder`                             | a format-1 pack chosen here goes to the packs                                                                       |
-| Drop hint         | `T.ADD.drop`, while a file is held over the window `T.ADD.dropHere` (the panel's border dashes amber) | in the app only                                                                                                     |
-| Result            | a line under the bar                                                                                  | `T.added.*`, `T.installedFrom.*`, or the error in `--err`                                                           |
+| Element           | Words                                                                                                 | Notes                                                                                                                                                                                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title             | `T.ADD.title`                                                                                         | Browse mods (`T.ADD.browse`, opens `T.ADD.modsUrl`) and Publish your mod (`T.ADD.publish`, opens `T.ADD.publishUrl`) beside it for Ratchet & Clank                                                                                            |
+| Link field        | placeholder `T.ADD.linkPlaceholder`, label `T.ADD.linkLabel`, button `T.ADD.go`                       | accepts https, http, no scheme, `.git`, `/tree/<branch>/<folder>`, `/releases/tag/<v>`, `git@github.com:o/r`, `o/r`; an `openrac.dev/mods/<id>` or `openrac://` link opens the change set; any other openrac.dev page says `T.ADD.notModPage` |
+| Added from before | `T.SAVED_SOURCES.label`, one button per link in `sources.json`                                        | only with a link already saved; a click fills the field and reads the repository, as typing it would                                                                                                                                          |
+| File, Folder      | `T.ADD.file`, `T.ADD.folder`; pickers `T.ADD.pickZip`, `T.ADD.pickFolder`                             | a format-1 pack chosen here goes to the packs                                                                                                                                                                                                 |
+| Drop hint         | `T.ADD.drop`, while a file is held over the window `T.ADD.dropHere` (the panel's border dashes amber) | in the app only                                                                                                                                                                                                                               |
+| Result            | a line under the bar                                                                                  | `T.added.*`, `T.installedFrom.*`, or the error in `--err`                                                                                                                                                                                     |
 
 ### A link's preview
 
@@ -203,6 +203,50 @@ A lead line with How it works (`T.ASSETS.lead`, `howItWorks`), then Export (a
 level, what, Export; Read the levels first for a game in early access; Open
 folder for the last export, `api.openOutput`) and Import your edits
 (`T.ASSETS.importLine`; the result `imported`, `importedRefused`, or the error).
+
+## The mod hub: Browse and the change set
+
+Mods from the signed index (`core/src/index.rs`; openrac-mods `INDEX_FORMAT.md`), installed from
+the Browse tab or an `openrac://` link from openrac.dev. Words: `T.CHANGE_SET`, `T.BROWSE`,
+`T.PRESET_LABEL`, `T.DETAIL_TAB` and the functions after them in modsText.ts.
+
+| Part                                                      | Component                                                      | What shows                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browse (tab `browse`; Android: under Add a mod, as cards) | `components/ModBrowse.svelte`                                  | search (`lib/modSearch.ts`, `/` focuses it, Esc clears), presets (`lib/modBrowse.ts`), a table and a details pane with Metadata, Relationships, Versions, Files and `T.BROWSE.viewOnSite`; a video is its picture and `T.BROWSE.watch`, opened in the browser |
+| The change set                                            | `components/DeepLinkInstall.svelte` (`lib/deepLink.svelte.ts`) | `T.CHANGE_SET.picked`, `alsoInstalls`, recommended (ticked) and suggested (not), one `nativeWarning`, `noteText` per note, blocking `conflictText` with `replaceWith`, `missingText`, `whyText`; the button `installCount(n)` or `T.CHANGE_SET.switchToDev`   |
+| Installing                                                | the same                                                       | each mod's `T.STEP_LABEL`; then `appliedText`, `T.CHANGE_SET.backedUp` when saves were backed up, `play` and `backToMods`                                                                                                                                     |
+
+| State                      | Words                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| Loading the list           | `T.CHANGE_SET.loading`                                                             |
+| The list could not be used | `modErrorText(kind)`, its detail folded, the error's action (`retry`, `useCached`) |
+| From the cache             | `offlineText(fetchedAt)`                                                           |
+| Past its expiry            | `T.INDEX_STATE.stale`                                                              |
+| A newer index format       | `T.INDEX_STATE.newerFormat`                                                        |
+| A revoked mod turned off   | `revokedOffText`                                                                   |
+| Nothing matches            | `noMatch(q)`, `didYouMean(name)`, `T.BROWSE.clearFilters`                          |
+
+### Kept current and tidy (Phase 5)
+
+| What                                                                                                           | Where                                                    | Words                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Updates in by themselves (patch, minor): at start, every 6 h, before Play with mods; never while the game runs | `lib/modAutoUpdate.svelte.ts`, `core/src/mod_updates.rs` | toast `updatedMods(n)`; "Just updated" with each changelog (`T.UPDATES.recentTitle`)                                                                          |
+| A major, or a native version with new hooks                                                                    | `components/ModUpdatesPanel.svelte`                      | `T.UPDATES.waitingTitle`, `holdText`, the changelog folded, `T.UPDATES.update`                                                                                |
+| Held back (another mod's `requires`, a newer launcher)                                                         | the same                                                 | `T.UPDATES.heldTitle`, `holdText` ("Held back: A needs B 1.2.0")                                                                                              |
+| Turning a mod on turns its dependencies on                                                                     | `PluginsPanel.svelte` (`plugins_turn_on`)                | `alsoTurnedOn(names)`                                                                                                                                         |
+| Turning off a mod others need                                                                                  | the same                                                 | asks `turnOffAsk(names, name)`                                                                                                                                |
+| Removing a mod                                                                                                 | the same (`plugins_orphans`, `plugins_remove_with`)      | the launcher's own unused dependencies go (Settings: `T.SETTINGS_TEXT.cleanUp`); the player's own are asked about with `removeDepsAsk`; then `removedDeps(n)` |
+| A mod from a link missing a dependency                                                                         | its row                                                  | `fixInstall(id)`, opening the change set                                                                                                                      |
+| Share my setup                                                                                                 | the panel's head                                         | `T.DEPS.shareSetup`; `T.DEPS.shareCopied` / `shareNone`                                                                                                       |
+| Kept at a version                                                                                              | `ModPage.svelte`'s source line                           | `pinnedShared` (installed from a shared setup's exact versions), `pinnedRollback`, else `keptAt`                                                              |
+| A crash after an update                                                                                        | `CrashNotice.svelte`                                     | `crashAfterUpdate(names)`, one `rollBackTo(name, version)` per mod, then `rolledBack`                                                                         |
+
+Updates are staged in `plugins/.staging/<id>/` and swapped in; the version replaced waits in
+`plugins/.previous/<id>/` (one kept). An update set is all or nothing.
+
+One link is shown at a time and one more waits; any others are dropped. A link never installs
+anything by itself. "Switch to the dev build" saves the dev channel and the link
+(`Config.pendingDeepLink`), which opens again after the update.
 
 ## Android
 

@@ -24,6 +24,7 @@
 #include "renderer/temporal_settings.h"
 #include "renderer/texture_filter.h"
 #include "renderer/ui/fps_counter.h"
+#include "renderer/volumetric_settings.h"
 
 namespace openrac::settings {
 
@@ -97,6 +98,7 @@ struct Settings {
     bool enhanced_graphics = true;  // F4 within it; retains individual feature preferences
     bool enhanced_shadows = true;   // cascades and Ratchet map; off restores original shadows
     renderer::ShadowQuality shadow_quality = renderer::ShadowQuality::High;
+    renderer::VolumetricQuality volumetric_quality = renderer::VolumetricQuality::Off;
     bool rim_light = true;
     // A texture pack from <data>/texture_packs/<game id>/ (docs/port/TEXTURE_PACKS.md); takes
     // effect at the next start.
@@ -112,6 +114,11 @@ struct Settings {
     bool environment_probe_debug =
         false;  // Baked reflection capture positions and influence boxes.
     float probe_gi_multiplier = 1.0f;
+    // The settings sweep's experiments alone (debug/capture.cpp); never saved.
+    bool sweep_probe_lighting_off = false;
+    bool sweep_translucent_off = false;
+    bool sweep_translucent_unlit = false;
+    bool sweep_translucent_full = false;
     float probe_normal_bias = 0.5f;  // receiver offsets in world units
     float probe_view_bias = 0.5f;
     bool sun_direction_override = false;
@@ -130,6 +137,7 @@ struct Settings {
 
     bool motion_blur = true;  // Motion relative to the tracking focus.
     renderer::MotionBlurSettings motion_blur_settings;
+    float lily_momentum = .25f;  // Tilt response time in seconds; zero follows waves immediately.
     float motion_blur_strength = 0.5f;       // Exposure strength in [0, 1].
     float temporal_sharpness = 0.2f;         // AMD RCAS strength in [0, 1].
     renderer::TextureFilter texture_filter = renderer::TextureFilter::EdgeAware;
@@ -149,7 +157,13 @@ struct Settings {
     int frame_cap = 60;                         // FrameRate::Capped's frames a second
     FrameCounter show_fps = FrameCounter::Off;  // Counter mode in the picture's corner.
     bool menu_bar =
-        true;  // the menus along the window's top (not on macOS, whose menu bar has them); Alt hides and shows it
+        true;  // the menus along the window's top (not on macOS, whose menu bar has them); menu_bar_key hides and shows it
+    // The key that hides and shows the menu bar, by its place on the keyboard: an SDL scancode name
+    // ("`", the key under Escape; "F4", "M"), or "Alt" (either Alt pressed and let go by itself).
+    std::string menu_bar_key = "`";
+    // The controller button that does the same: an SDL gamepad button name ("paddle1", the
+    // Steam Controller's R4; "misc1", "back"), or "none".
+    std::string menu_bar_button = "paddle1";
     bool mute_unfocused = false;  // silence while another window has the keyboard
     bool skip_cutscenes = true;   // Start skips an in-game cutscene (without the game's L1 L2 R1 R2 hold)
     // Lower input latency, off by default (the timing players know). Reads the pad again just
@@ -184,6 +198,12 @@ Settings& get();
 
 // Reads `file` (missing or unreadable: the defaults) and remembers it for save().
 void load(const std::filesystem::path& file);
+
+// A first start, the file load() read having no display_mode (nor the older fullscreen key): the
+// game covers the screen (borderless) instead of opening a window. A file with either key keeps
+// what it says, so a player's own setup never changes. `scripted` (a hidden window, an offscreen
+// video driver: checks and tools) keeps the window. Returns whether the mode changed.
+bool first_start_display(bool scripted);
 
 // The settings in one line, for the log and its header.
 std::string summary();

@@ -526,12 +526,15 @@ bool make_device(std::string& error) {
     features.drawIndirectFirstInstance = g->features.drawIndirectFirstInstance;
     features.multiDrawIndirect = g->features.multiDrawIndirect;
     features.multiViewport = g->features.multiViewport;
+    features.textureCompressionBC = g->features.textureCompressionBC;
 #if OPENRAC_ENHANCED_RENDERING
     // Native enhanced compute providers need these optional storage-image operations.
     features.shaderStorageImageExtendedFormats = g->features.shaderStorageImageExtendedFormats;
     features.shaderStorageImageWriteWithoutFormat =
         g->features.shaderStorageImageWriteWithoutFormat;
     features.shaderStorageImageReadWithoutFormat = g->features.shaderStorageImageReadWithoutFormat;
+    // Arm ASR's fragment passes also write storage images.
+    features.fragmentStoresAndAtomics = g->features.fragmentStoresAndAtomics;
 #endif
     g->features = features;
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -540,14 +543,22 @@ bool make_device(std::string& error) {
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceFeatures2 available{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     available.pNext = &f11;
+    VkPhysicalDeviceVulkan13Features supported13{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
+    };
     f11.pNext = &f12;
+    f12.pNext = &supported13;
     vkGetPhysicalDeviceFeatures2(g->physical, &available);
+    g->astc_hdr = supported13.textureCompressionASTC_HDR;
+    f13.textureCompressionASTC_HDR = supported13.textureCompressionASTC_HDR;
     // shaderFloat16 is core in Vulkan 1.2; storage16BitAccess is a separate feature and is not needed.
     g->shader_float16 = f12.shaderFloat16
                         && renderer::render_opt::enabled(renderer::render_opt::Opt::ShaderFloat16);
     // The vendor FSR half path also uses native 16-bit integer indexing. No 16-bit storage is enabled.
     features.shaderInt16 = g->shader_float16 && available.features.shaderInt16;
     g->features.shaderInt16 = features.shaderInt16;
+    // Arm ASR's prebuilt shaders also use subgroup operations on their 16-bit values.
+    g->subgroup_extended_types = g->shader_float16 && f12.shaderSubgroupExtendedTypes;
     g->viewport_index_supported = features.multiViewport && f12.shaderOutputViewportIndex;
     // Vulkan 1.3 made extended dynamic state core, with no feature to ask for (documented: the
     // Vulkan 1.3 promotion of VK_EXT_extended_dynamic_state); the device was chosen for 1.3.
@@ -572,6 +583,7 @@ bool make_device(std::string& error) {
     f11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     f12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     f12.shaderFloat16 = g->shader_float16 ? VK_TRUE : VK_FALSE;
+    f12.shaderSubgroupExtendedTypes = g->subgroup_extended_types ? VK_TRUE : VK_FALSE;
     f12.shaderOutputViewportIndex = g->viewport_index_supported ? VK_TRUE : VK_FALSE;
     f13.pNext = &f11;
     f11.pNext = &f12;
@@ -599,6 +611,18 @@ bool make_device(std::string& error) {
         for (const VkExtensionProperties& e : offered) {
             if (std::strcmp(e.extensionName, kPortabilitySubset) == 0) {
                 extensions.push_back(kPortabilitySubset);
+            }
+        }
+
+        // The same operations under two names: the EXT one where offered, which more tools know.
+        for (const char* name :
+             {VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME}) {
+            const bool offers = std::any_of(offered.begin(), offered.end(), [&](const auto& e) {
+                return std::strcmp(e.extensionName, name) == 0;
+            });
+            if (offers && !g->load_store_none) {
+                extensions.push_back(name);
+                g->load_store_none = true;
             }
         }
     }
@@ -806,6 +830,7 @@ void destroy_all() {
         // Teardown drains all slots directly; resource retirement must not begin another recording.
         g->frame_pending = false;
         release_depth_combine();
+        release_colour_transform();
         tracy_gpu_close();
         gpu_release();
         material_release();

@@ -19,6 +19,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -825,6 +826,24 @@ class Translate(unittest.TestCase):
             (src / "assembly" / "f.c").rename(src / "f.c")
             prep.copy_tree(src, dst)
             self.assertEqual(sorted(p.relative_to(dst).as_posix() for p in dst.rglob("*.c")), ["f.c"])
+
+    def test_prepared_copies_have_lf_line_ends_as_on_windows(self):
+        """Windows writes text with CRLF: Clang's byte offsets in the prepared copy then ran ahead
+        of the text read back, name_vla_lengths found nothing, and rac1-pal's func_L10_002DBA50
+        (the Orxon barriers' strands) stayed untranslated. The copies are LF on every system."""
+        real = Path.write_text
+
+        def as_on_windows(self, data, encoding=None, errors=None, newline=None):
+            return real(self, data, encoding=encoding, errors=errors, newline="\r\n" if newline is None else newline)
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(Path, "write_text", as_on_windows):
+            src, dst = Path(tmp) / "src", Path(tmp) / "prep"
+            src.mkdir()
+            (src / "f.c").write_bytes(b"void f(int n) {\r\n    char s[n * 4];\r\n}\r\n")
+            prep.copy_tree(src, dst)
+            self.assertNotIn(b"\r", (dst / "f.c").read_bytes())
+            clangast._write(dst / "f.c", "void f(int n) {\n    unsigned int s__vlan = (n * 4); char s[s__vlan];\n}\n")
+            self.assertNotIn(b"\r", (dst / "f.c").read_bytes())
 
     def test_function_pointers_by_code_address(self):
         out = self.run_program({"a.c": """
@@ -1858,6 +1877,29 @@ class Places(unittest.TestCase):
             self.assertIn("0x00238128u", text)
             self.assertIn("0x00237B70u", text)
 
+    def test_a_call_through_a_folded_wrapper_that_passes_a_float_goes_by_kind(self):
+        # rac1's Batalia bomber tank calls the colour tween through its level's place of the folded
+        # wrapper func_L00_00237B70, declared (float, int, int); the tween there takes (unsigned,
+        # unsigned, float). Through the call site's type Windows x64 passed the float first and the
+        # colours came out wrong: the call goes with the EE's registers, each kind in its order.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.generate(Path(tmp),
+                "void func_L00_00237B70(void) {}\n"
+                "extern int tween(float, int, int) __asm__(\"func_L08_00264930\");\n"
+                "extern void keep(int) __asm__(\"func_L08_00264378\");\n"
+                "int func_L08_002DC9A8(float t) { keep(5); return tween(t, 0x7f000000, 0x7f182030); }\n",
+                "func_L00_00237B70\tshared\t28\tfp\t3\t00:00237B70,08:00264378,08:00264930\n"
+                "func_L08_002DC9A8\tlevel\t64\tfp2\t1\t08:002DC9A8\n",
+                {"relocate": [0x15F000, 0x500000]})
+            text = (out / "a.c").read_text()
+            self.assertIn("openrac_guest_call_regs(openrac_folded_call(", text)
+            self.assertIn("float a0_ = (float)(t); uint64_t a1_ = (uint64_t)(2130706432); "
+                          "uint64_t a2_ = (uint64_t)(2132287536);", text)
+            self.assertIn("(const uint64_t[8]){a1_, a2_, 0,", text)
+            self.assertIn("(const float[8]){a0_, 0.0f,", text)
+            # Integers alone keep the call site's type.
+            self.assertRegex(text, r"GFN\(void \(\*\)\(int\), openrac_folded_call\(")
+
     def test_the_address_of_a_folded_wrapper_is_the_one_the_code_forms(self):
         # rac1's Umbris sea classes register func_00216270 as their draw callback: the catalogue
         # folds 32-byte wrappers that each call another function into that name, and each class's
@@ -2398,6 +2440,48 @@ class FromAssembly(unittest.TestCase):
         self.assertEqual(out[0], "20")
         self.assertEqual(out[1:3], ["-0.500", "3.000"])
         self.assertEqual(out[3], "340282346638528859811704183484516925440.000")
+
+    def test_a_shadow_computes_as_the_ee_and_reaches_memory_through_the_port(self):
+        # hostgen.json "asm" "shadows": the function translated once more, as
+        # openrac_shadow_<alias>, its floats the EE's (1 + 1.5 * 2^-24 is 1: the adder drops the
+        # bits), its memory reached through openrac_shadow_ptr (the port's checker), with a table
+        # of the translations. The game's own call is the ordinary translation.
+        config = {"asm": {**ASM_CONFIG["asm"], "shadows": {"sum": "func_00100000", "none": "func_00999999"}},
+                  "host_functions": HOST_FUNCTIONS + ["shadow_test"]}
+        files = {f"game/asm/func_00100000.s": assembler.assemble("func_00100000", 0x00100000, """
+                lwc1 $f0, 0($4)
+                lwc1 $f1, 4($4)
+                add.s $f0, $f0, $f1
+                swc1 $f0, 8($4)
+                jr $31
+                lw $2, 8($4)
+            """)}
+        out = self.run_program({"a.c": """
+            extern unsigned D_00200000[4];
+            INCLUDE_ASM("asm", func_00100000);
+            extern int func_00100000(unsigned *p);
+            extern void shadow_test(void);
+            int test_main(void) {
+                D_00200000[0] = 0x3F800000u;
+                D_00200000[1] = 0x33C00000u;
+                test_print(func_00100000(D_00200000));
+                shadow_test();
+                return 0;
+            }
+        """}, config=config, extra_files=files, cxx=PS2FLOAT_CXX, host_c="""
+            #include <stdio.h>
+            extern void *const openrac_shadow_sum_fn;
+            extern void *const openrac_shadow_none_fn;
+            void *openrac_shadow_ptr(gaddr a) { printf("at %x\\n", a); return G(a); }
+            void game_shadow_test(void) {
+                printf("%d\\n", ((int (*)(unsigned))openrac_shadow_sum_fn)(0x200000u));
+                printf("%d\\n", openrac_shadow_none_fn == 0);
+            }
+        """)
+        self.assertEqual(out[0], str(0x3F800001))
+        self.assertEqual(out[1:], ["at", "200000", "at", "200004", "at", "200008", "at", "200008",
+                                   str(0x3F800000), "1"])
+        self.assertEqual(self.last_report["shadows"], {"sum": "translated", "none": "no function func_00999999"})
 
     def test_loads_and_stores(self):
         out = self.run_asm("""

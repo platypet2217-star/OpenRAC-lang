@@ -2,6 +2,8 @@
 // Copyright (c) 2026 the OpenRAC contributors
 #pragma once
 
+#include <array>
+
 #include "renderer/ambient_occlusion.h"
 #include "renderer/framebuffer.h"
 #include "renderer/shader.h"
@@ -39,15 +41,19 @@ public:
     void release() override;
 
 private:
+    // Allocates size-dependent targets, keeping caller-owned depth textures borrowed.
     bool prepare(int width, int height, int scale, bool visibility, bool copy_depth);
+    // Compiles the requested quality kernel and its shared composite on first use.
+    bool prepare_program(int scale, bool normals, bool performance);
     FrameBuffer m_depth;
     unsigned m_sampled_depth = 0;  // Borrowed target depth or our owned copy for this render.
     unsigned m_ao_buffer = 0, m_ao_texture = 0;
     int m_ao_width = 0, m_ao_height = 0;
     FrameBuffer m_visibility;
-    Shader m_evaluate;
-    Shader m_evaluate_performance;
-    Shader m_composite;
+    // Four bounded scale/normal variants plus the uniform-controlled reference.
+    // Each quality kernel is built only on its own first use, sharing the composite.
+    std::array<Shader, 5> m_evaluate, m_evaluate_performance, m_composite;
+    unsigned m_program = 4;
     unsigned m_vao = 0;
     bool m_failed = false;
 };

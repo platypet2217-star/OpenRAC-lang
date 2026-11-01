@@ -107,7 +107,7 @@
   }
 
   $effect(() => {
-    // Again whenever saves were brought onto the card from elsewhere (app.savesChanged: an import).
+    // Again whenever the card changed elsewhere (app.savesChanged: an import, the game ending).
     if (app.savesChanged >= 0) void loadStatus();
   });
 </script>
