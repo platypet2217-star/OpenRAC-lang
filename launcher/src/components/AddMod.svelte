@@ -19,6 +19,8 @@
   } from "$lib/api";
   import { addMods, type Added } from "$lib/addMods";
   import { app, guardShown } from "$lib/app.svelte";
+  import { openLink } from "$lib/deepLink.svelte";
+  import { hubLink, isSiteLink } from "$lib/modBrowse";
   import { modHint, modKind } from "$lib/plugins";
   import * as T from "$lib/modsText";
   import Icon from "./Icon.svelte";
@@ -92,10 +94,21 @@
   async function readLink(e: SubmitEvent) {
     e.preventDefault();
     if (!link.trim()) return;
-    reading = true;
     preview = null;
     previewError = null;
     said = null;
+    // A mod's page on the website goes to the same change set as its Install button.
+    const hub = hubLink(link);
+    if (hub) {
+      link = "";
+      void openLink(hub);
+      return;
+    }
+    if (isSiteLink(link)) {
+      previewError = T.ADD.notModPage;
+      return;
+    }
+    reading = true;
     try {
       preview = await api.pluginsPreview(v.game, v.name, link.trim());
     } catch (err) {
@@ -126,7 +139,7 @@
         onadded({ plugin: true, pack: false });
       }
       if (preview.mods.length > 1) {
-        // A repository of several mods (rac1-mods): the preview stays for the others, this one
+        // A repository of several mods (openrac-mods): the preview stays for the others, this one
         // now installed.
         preview = { ...preview, mods: preview.mods.map((x) => (x.id === m.id ? { ...x, installed: m.version } : x)) };
       } else {
@@ -188,6 +201,9 @@
     {#if v.game === "rac1"}
       <button class="small ghost" onclick={() => void guardShown(api.openUrl(T.ADD.modsUrl))}
         ><Icon name="external" size={14} />{T.ADD.browse}</button
+      >
+      <button class="small ghost" onclick={() => void guardShown(api.openUrl(T.ADD.publishUrl))}
+        ><Icon name="external" size={14} />{T.ADD.publish}</button
       >
     {/if}
   </div>

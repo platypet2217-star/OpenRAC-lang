@@ -34,11 +34,13 @@ paused or slowed, a line at the top of the picture says so and names the keys
 that undo it; a screenshot says where it went.
 
 The same keys are menus. On Windows and Linux a bar along the window's top
-has View, Graphics, Enhanced, Sound and Developer, with a tick beside what is on
+has Game, Graphics, Enhanced, Sound and Developer, with a tick beside what is on
 (Graphics lists the picture's settings with their values; a click moves one
-to its next value, and the menu stays open); Alt by itself
-hides it and shows it again, and View > "Hide these menus" hides it (the
-`menu_bar` setting keeps the choice). On macOS the system's menu bar has
+to its next value, and the menu stays open); its key (`menu_bar_key`, `` ` ``
+by default) and controller button (`menu_bar_button`, R4) hide it and show it
+again, and Game > "Hide these menus" hides it (the
+`menu_bar` setting keeps the choice). Game > "Exit game" closes the game as the
+window's close button does. On macOS the system's menu bar has
 View, Sound and Developer instead (the game's own Video options page has the
 picture's settings there); `OPENRAC_MENU_BAR=1` shows the in-window bar too.
 On Android they are a drawer that slides in from the left (docs/port/ANDROID.md);
@@ -351,6 +353,7 @@ These variables are read by `openrac-<game>` at run time. Unless said otherwise,
 | `OPENRAC_FPS` | any (set) | Every 300 frames, logs the frames per second over that span. | `port/game/common/main.cpp` |
 | `OPENRAC_HITCH` | any (set) | Logs each frame that took more than 1.25 times the frame time, with its duration in ms. | `port/game/common/main.cpp` |
 | `OPENRAC_WATER_OFF` | `1` | Original Novalis water reference: disables enhanced water shading and simulation. Vulkan enhanced rendering otherwise loads a local `water.bin` bake beside the level manifest. | `port/enhanced/renderer/water.cpp` |
+| `OPENRAC_WATER_VIEW` | `0-17` | Overrides live enhanced-water debug controls: 0 lit; 1-4 simulation; 5 direct; 6 reflections; 7 lighting; 8 mask; 9 captures; 10 GI fallback; 11 cached GI; 12 reference selection; 13 foam off; 14 foam mask; 15 reference foam; 16 shoreline mask; 17 reference shoreline. Unset keeps the live controls. | `port/enhanced/renderer/water_simulation.cpp` |
 | `OPENRAC_WATCH` | `ADDRESS:COUNT[:i],...` | Each frame, logs `COUNT` values (at most 32) from each hexadecimal game `ADDRESS`: floats by default, words with the third field `i`. `COUNT` is decimal. | `port/game/common/main.cpp` |
 | `OPENRAC_GUARD` | `FRAME:ADDRESS:BYTES[:SKIP]` | From window frame `FRAME` on, the first write (after `SKIP` of them) into `BYTES` bytes of game memory at `ADDRESS` ends the program with the host's stack, to find what corrupts them. `FRAME` and `SKIP` are decimal, `ADDRESS` and `BYTES` hexadecimal (default 4). | `port/game/common/main.cpp` |
 | `OPENRAC_TRACE_INPUT` | any (set) | Logs a port's buttons and stick values, at most every 25 frames per port. | `port/game/common/frontend.cpp` |
@@ -364,6 +367,8 @@ These variables are read by `openrac-<game>` at run time. Unless said otherwise,
 | `OPENRAC_ITEMS_DEBUG` | `1` (not `0`) | Prints what the hero and each co-op figure hold, the pieces made, the classes decoded and the shots fired or kept from hitting, on stderr. | `port/game/rac1/host/figure_items.c` |
 | `OPENRAC_ANIM_TRACE` | any (set) | Prints each co-op figure's animation as it is posed (its seq, blend target, key, next key, time and speed before and after, and what was done: run, blend, blending, snap) on stderr, one `ATRACE F` line each; the multiplayer mod prints the poses it sends, receives and shows beside them. | `port/game/rac1/host/play.c` |
 | `OPENRAC_COLL_TRACE` | any (set) | Counts collision queries and hits by kind (line, sphere, capsule, sphere-mobys, hero-groups, boot line) and prints the totals on stderr every 2000 queries. | `port/game/rac1/host/collision.c` |
+| `OPENRAC_COLL_CHECK` | `1`, or `N` | Runs every collision query twice: as `collision.c` computes it and as the retail kernel's own instructions do (hostgen asmc translates them from the disc into `asm_shadows.c`, never committed; floats through `ps2float.h`). Prints each query whose result, memory written, pose cache or hit registers (vf2.w, vf25..vf29) differ, and a tally every 5000 queries and at exit. `N` > 1 also compares all of RAM every Nth query. The game keeps `collision.c`'s result. Slow; for checking only. | `port/game/rac1/host/collision_check.c` |
+| `OPENRAC_COLL_CHECK_PRINT` | number (400) | How many differing queries `OPENRAC_COLL_CHECK` prints per kind. | `port/game/rac1/host/collision_check.c` |
 | `OPENRAC_UI_LOG` | any (set) | Logs the caller of each 2D quad routine call and each emitted quad. | `port/game/rac1/host/ui2d.c` |
 
 ### Renderer and timing switches
@@ -383,6 +388,7 @@ These variables are read by `openrac-<game>` at run time. Unless said otherwise,
 | `OPENRAC_PROBE_SKY_INTENSITY` | a number, 0 or more | The sky intensity the probe bake must have been made with, in place of the bake profile's. A value that is not wholly a finite number of 0 or more leaves the GI off, with the reason in the log. | `port/enhanced/viewer/probe_lighting.cpp` |
 | `OPENRAC_VK_UNIFORM_REUSE_OFF` | any (set; unset for the optimised path) | Vulkan profiling reference: redundant uniform writes dirty the default block; ordinary uniform descriptors include each upload offset. Default uses byte comparisons, dynamic uniform offsets and bounded per-frame descriptor reuse. Set before startup. | `port/renderer/vulkan/vkgl_internal.h` |
 | `OPENRAC_GPU_MARKERS` | any (set; unset for off) | Names timed GPU passes in AMD RGP and other Vulkan profilers. Requires configuring with `-DOPENRAC_GPU_MARKERS=ON` (default OFF) and active stats collection, such as `--debug-dump`. Label lookup and Vulkan label calls are compiled out otherwise. | `port/renderer/vulkan/vkgl_commands.cpp`, `port/renderer/vulkan/vkgl_device.cpp` |
+| `OPENRAC_GPU_PASS_TIMING` | any (set; unset for off) | Vulkan: every section timed on the GPU ends the render pass it falls in, at its start and its end, so that a tile-based GPU (Mali, Adreno, Apple) times it; otherwise its timestamps lie inside one pass and read about zero. Each split stores and loads the attachments again, so the frame is slower while it is on. Without it, a recording splits one frame in ten on a tile-based GPU by itself (stats::set_pass_sampling). | `port/renderer/vulkan/vkgl_commands.cpp` |
 | `OPENRAC_GPU_DRIVEN_OFF` | any (set) | Reference (Vulkan): instance visibility on the CPU and direct mesh draws, in place of the GPU-driven path. See [GPU rendering](RAC1_GPU_DRIVEN.md). | `port/renderer/vulkan/vkgl.cpp` |
 | `OPENRAC_GPU_MATERIALS_OFF` | any (set) | Reference (Vulkan): each mesh's material uniforms and textures bound one by one; takes effect at the next shader reload. | `port/renderer/vulkan/gpu_materials.inc` |
 | `OPENRAC_VK_EFFECT_UPLOAD_REUSE_OFF` | any (set) | Reference (Vulkan): every effect texture upload is copied and hashed, and identical ones are not reused. | `port/renderer/effects.cpp` |
@@ -407,11 +413,14 @@ These variables are read by `openrac-<game>` at run time. Unless said otherwise,
 | `OPENRAC_SHADOW_ATLAS_OFF` | any (set; unset for default) | Uses separate shadow targets instead of the indexed-viewport atlas; retains batching across layers. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_OPAQUE_COLOUR_BATCH_OFF` | any (set; unset for default) | Restores opaque colour in per-layer order. The default Vulkan material path groups solid and alpha-capable opaque colour across enabled layers when reusing the world depth prepass. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_OPAQUE_SPECIALISE_OFF` | any (set; unset for default) | Restores the combined opaque and general static translucent shaders. The specialised Vulkan material path separates static solid, static cutout, opaque moby and static translucent programs, retaining layer-uniform skinning and probe controls. | `port/scene/level_renderer.cpp` |
+| `OPENRAC_PROBE_FAST_OFF` | any (set; unset for default) | Enhanced: the blended static passes (glass, water, foliage) read full probe light again. By default they read one probe volume without the depth test of each probe and filter shadows with four taps, which is much cheaper where they cover the screen several times. Same as `OPENRAC_RENDER_OPT_OFF=probe-fast-blended`. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_SHADOW_LAYER_REFERENCE` | any (set; unset for default) | Uses per-layer shadow buckets and separate targets. Detailed sun timing also uses separate targets. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_SHADOW_GATHER_OFF` | any (set) | Reference: 16 individual shadow texel fetches in place of gathers; takes effect when the level is loaded again. | `port/enhanced/viewer/probe_lighting.cpp` |
 | `OPENRAC_SUN_RECEIVER_CULL_OFF` | any (set) | Reference: square shadow-map caster bounds for the sun's cascades. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_SUN_INSTANCE_CULL_OFF` | any (set) | Profiling reference: every instance of a cascade group that survives culling is kept. | `port/scene/level_renderer.cpp` |
 | `OPENRAC_SUN_TIMING_DETAIL` | any (set) | GPU timers per cascade and per layer for the sun's shadows, at a higher profiling cost; otherwise the four whole-map timers, which include the clears. | `port/scene/level_renderer.cpp` |
+| `OPENRAC_TEMPORAL_UPSCALER` | `asr` or `fsr3` | The temporal upscaler behind Enhanced temporal reconstruction: Arm Accuracy Super Resolution (fragment passes, made for phone GPUs; needs 16-bit shader arithmetic) or AMD FSR 3.1. Unset, ASR on a Qualcomm (Snapdragon) GPU and FSR 3.1 elsewhere; ASR falls back to FSR 3.1 when it cannot start. | `port/enhanced/asr/asr_context.cpp` |
+| `OPENRAC_TILE_BASED` | `1` or `0` | Vulkan: whether the device is treated as tile-based, where the optimisations that save attachment traffic and vertex binning default on; unset, Arm, Qualcomm, Apple and Imagination GPUs are. | `port/renderer/vulkan/vkgl.cpp` |
 | `OPENRAC_EARLY_LIGHTING_OFF` | any (set) | Reference: full-resolution GI and cascades; takes effect when the level is loaded again. | `port/enhanced/viewer/early_lighting.cpp` |
 | `OPENRAC_SUN_SHADOWS` | `0`: off; otherwise on in gameplay | Four sun cascades (nearest 2048, others 1024), 256-unit range, filtered comparisons. Fully shadowed primary and directional fill retain 10%; GI stays independent. Suppresses stencil shadows. See [sun shadows](../../port/enhanced/docs/RAC1_SUN_SHADOW.md). | `port/game/common/frontend.cpp` |
 | `OPENRAC_PROBE_RAYS` | integer, default `1024` | Expected bake ray budget for activation. Must match the ray budget used by the bake. | `port/enhanced/viewer/probe_lighting.cpp` |

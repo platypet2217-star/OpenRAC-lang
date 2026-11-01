@@ -4,6 +4,9 @@
   import LaunchScreen from "$components/LaunchScreen.svelte";
   import Toasts from "$components/Toasts.svelte";
   import ModUpdateModal from "$components/ModUpdateModal.svelte";
+  import DeepLinkInstall from "$components/DeepLinkInstall.svelte";
+  import { startDeepLinks } from "$lib/deepLink.svelte";
+  import { startAutoUpdates } from "$lib/modAutoUpdate.svelte";
   import UpdateModal from "$components/UpdateModal.svelte";
   import { errorText, onAndroid } from "$lib/api";
   import { app, openDevelop, refresh, showLaunch, start, updateDiscordPresence, type Page } from "$lib/app.svelte";
@@ -46,9 +49,8 @@
   if (onAndroid) preloadArt();
 
   $effect(() => {
-    // Android: the launcher's accent is the picked game's own (themes.ts), the colour easing from
-    // one to the next (app.css).
-    if (!onAndroid) return;
+    // The launcher's accent is the picked game's own (themes.ts), the colour easing from one to the
+    // next (app.css).
     const style = document.documentElement.style;
     for (const name of ACCENT_PROPERTIES) style.removeProperty(name);
     for (const [name, value] of accentProperties(app.version?.split("/")[0] ?? null)) style.setProperty(name, value);
@@ -128,6 +130,10 @@
         // The installed mods are looked at once a day, where they came from a link: what is found
         // is offered in one window and read by the Mods tab, so GitHub is not asked twice.
         if (app.config?.checkModUpdates) void lookForModUpdates().catch(() => undefined);
+        // openrac:// links (the website's Install buttons): the start's own, then each one sent.
+        void startDeepLinks().catch(() => undefined);
+        // Mods from the index kept current: now, then every 6 hours (lib/modAutoUpdate).
+        stopAutoUpdates = startAutoUpdates();
         // ?launch: the version's start (Android's spinning disc), as Play shows it.
         if (params.has("launch") && version) {
           const game = app.library?.games.find((g) => g.id === version.split("/")[0]);
@@ -141,7 +147,9 @@
     // Pick up what changed outside the launcher (a build in a terminal, a new disc).
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
+    let stopAutoUpdates: () => void = () => undefined;
     return () => {
+      stopAutoUpdates();
       window.removeEventListener("focus", onFocus);
     };
   });
@@ -178,6 +186,7 @@
 <Toasts />
 <UpdateModal />
 <ModUpdateModal />
+<DeepLinkInstall />
 
 <style>
   .loading {

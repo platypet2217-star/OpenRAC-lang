@@ -153,7 +153,7 @@ unknown *value* warns in the log and falls back to the default; an unknown
 
 | Key | Values | Default | Note |
 |---|---|---|---|
-| `display_mode` | `windowed`, `borderless`, `fullscreen` | `windowed` | |
+| `display_mode` | `windowed`, `borderless`, `fullscreen` | `windowed` | Absent on a first start: `borderless`. |
 | `fullscreen` | `0`/`1` | — | Legacy: `1` means `borderless`. |
 | `monitor` | `0`–`64` | `0` | |
 | `resolution` | `desktop` or `WIDTHxHEIGHT` | desktop | Fullscreen mode. |
@@ -200,7 +200,7 @@ A file with `frame_rate` but no `vsync` gets `vsync = on` when
 | **F9** / **F10** | Volume down / up |
 | **F11** | Full screen |
 | **F12** | Screenshot |
-| **Alt** | Hide and show the in-window menus (on its own) |
+| **`** (key under Escape) | Hide and show the in-window menus (`menu_bar_key`, pad: R4, `menu_bar_button`; Controller bindings, Menu bar tab) |
 | **Alt+Return** | Fullscreen |
 
 ## 5. The input map
@@ -283,7 +283,7 @@ The hero's fields are also exposed by name to script mods:
 | **Script binding** | rac1 only; the others use `script_binding_none.c` and refuse script mods |
 | **Script budget** | 2 ms per call, `OPENRAC_SCRIPT_BUDGET_MS` |
 | **Per-tick cost with no mods** | One test of a bool (`mods.h:67-71`) |
-| **The mod list** | <https://github.com/OpenRAC/rac1-mods> |
+| **The mod list** | <https://github.com/OpenRAC/openrac-mods> |
 
 The full hook table with signatures and parameters is generated into
 [`sdk/docs/reference/hooks-rac1.md`](../../../sdk/docs/reference/hooks-rac1.md),

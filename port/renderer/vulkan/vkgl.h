@@ -111,6 +111,9 @@ bool active();
 // (including readback flush boundaries), not merely one displayed frame.
 bool gpu_driven_active();
 bool gpu_materials_active();
+// Starts a recording if needed and returns its identity; zero without GPU instance rendering.
+// Cached instance batches must be rebuilt after the identity changes, including readback flushes.
+std::uint64_t gpu_instance_recording();
 // Indexed viewports route shadow draws to atlas rectangles from the vertex
 // shader. Empty rectangles restore the ordinary single-viewport path.
 bool indexed_viewports_supported(unsigned count);
@@ -122,6 +125,11 @@ renderer::GpuInstanceBatch gpu_instances(
 );
 bool draw_gpu_instances(
     renderer::GpuInstanceBatch batch, unsigned first_index, unsigned index_count
+);
+
+// Consecutive ranges sharing all current state and one instance batch. No per-draw materials.
+bool draw_gpu_instance_ranges(
+    renderer::GpuInstanceBatch batch, std::span<const renderer::GpuIndexRange> ranges
 );
 
 // Draws triangles with uint32 indices from the current vertex array using a compute-written command.
@@ -233,6 +241,9 @@ struct SubmissionCounters {
     // can see (VmaAllocationInfo's memory type), made so far.
     std::uint64_t buffer_static_bytes_host_visible = 0;
     std::uint64_t cpu_mirror_bytes = 0;  // Now: the CPU copies GL's buffers keep (glBufferData).
+    std::uint64_t buffer_zero_fill_bytes =
+        0;  // Cumulative: glBufferData mirror zero initialisation.
+    std::uint64_t buffer_mirror_restore_bytes = 0;  // Cumulative: discarded mirrors recovered.
     // Bytes the CPU writes for the GPU-driven instances: each batch's payload as it is built, and
     // its copy into the mapped input page at the end of the recording.
     std::uint64_t gpu_payload_bytes = 0;
@@ -332,5 +343,24 @@ bool software();
 // buffer's staged copy goes (docs/port/RENDER_PERF.md, "R-05"). False with no context, and on a
 // driver whose every memory type the host sees (lavapipe, some integrated GPUs).
 bool device_only_memory();
+
+// True when the open device draws a pass tile by tile in on-chip memory: Arm Mali, Qualcomm
+// Adreno, Apple and Imagination GPUs, told by the vendor's id (Vulkan has no property for it).
+// There vertex binning and attachment traffic cost most, so the optimisations that save them
+// default on (docs/port/RENDER_PERF.md, "Tile-based GPUs"). OPENRAC_TILE_BASED=1 or 0 overrides
+// the guess, to try a tile-based default on a desktop GPU or to compare without it. False with
+// no context.
+bool tile_based();
+
+// The open device's PCI vendor id (0x5143 Qualcomm, 0x13B5 Arm, ...); 0 with no context.
+std::uint32_t vendor_id();
+
+// Split pass timing: each section timed on the GPU (stats::kGpu) ends the render pass it falls
+// in, at its start and at its end, so that its timestamps lie between passes. A tile-based GPU
+// runs a pass's draws together, so timestamps inside one pass read about zero; split, every
+// timed section reads its own time, at the price of the attachments each split stores and loads
+// again (the frame is slower while it is on). Off by default; OPENRAC_GPU_PASS_TIMING turns it on.
+// Without it, a performance capture splits one frame in a few (stats::set_pass_sampling).
+bool split_pass_timing();
 
 }  // namespace openrac::vkgl

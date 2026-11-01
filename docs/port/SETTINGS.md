@@ -40,7 +40,7 @@ The legacy `probe_lighting` key is accepted but ignored and is omitted when savi
 
 | Row | Key | Values (default first) | What it does |
 |---|---|---|---|
-| Display mode | `display_mode` | `windowed`, `borderless`, `fullscreen` | A window; a window covering the desktop at the desktop's own mode; or the display taken for the game at `resolution`. F11 and Alt+Return go between the window and the fullscreen kind last used |
+| Display mode | `display_mode` | `windowed`, `borderless`, `fullscreen` | A window; a window covering the desktop at the desktop's own mode; or the display taken for the game at `resolution`. F11 and Alt+Return go between the window and the fullscreen kind last used. A first start (a file with no `display_mode`, nor the older `fullscreen`) is `borderless`; a file that has either keeps what it says, and a hidden window or an offscreen video driver (checks, tools) keeps the window |
 | Monitor | `monitor` | `0`, `1`, `2`, ... | The display borderless and fullscreen cover, and the one the window opens on: `0` is wherever the window is, `1` the first display SDL lists (the primary one) |
 | Resolution | `resolution` | `desktop`, `WIDTHxHEIGHT` | The display's mode in `fullscreen`. The page offers the modes the chosen display lists; a size it does not have becomes the closest it has |
 | (the window) | `window_size` | `WIDTHxHEIGHT` | The window's size when last sized, kept for the next start. Absent: 1280 x 960, or as wide as `aspect` makes it |
@@ -51,12 +51,13 @@ The legacy `probe_lighting` key is accepted but ignored and is omitted when savi
 | Anti-aliasing | `msaa` | `1` (`off`), `2`, `4`, `8`, `16` | Samples a pixel (MSAA). The page offers what the card gives (`GL_MAX_SAMPLES`); a file's larger number is held to it |
 | Enhanced rendering (experimental) | `enhanced_rendering` | `0` (default), `1` | Whether the game makes the enhanced renderer at all (probe lighting, modern sun/Ratchet shadows, GTAO; [port/enhanced](../../port/enhanced/README.md)). Read at start; Vulkan only. Off, none of it is made and the game draws exactly as a build without it. The launcher's Mods tab writes it (**Enhanced graphics**, a built-in entry with the keys below on its page) and then plays with Vulkan (`OPENRAC_GL_API=vulkan`) and the player's probe bakes (`--probes <data>/probes/<version>`), which it makes from their own extracted levels. From a shell, `OPENRAC_ENHANCED=1` does the same as the key; `OPENRAC_ENHANCED=0` keeps it off |
 | Enhanced graphics (F4) | `enhanced_graphics` | `1` (default), `0` | With enhanced rendering on: the in-game master switch for probe lighting, modern sun/Ratchet shadows, GTAO and FSR. Turning it off restores original lighting/stencil shadows and native rendering without changing individual preferences |
-| FSR temporal upscaling | `temporal_quality` | `off`, `native-aa`, `quality` (default), `balanced`, `performance` | Enhanced Vulkan only, with compatible probe data. Reconstructs the world before the full-resolution HUD; no frame generation. Quality uses a 1.5x display-to-render ratio, Balanced 1.7x and Performance 2x. Native AA uses the existing render resolution. Active FSR replaces MSAA while preserving its saved setting. Requires a build with `OPENRAC_FSR3`; unsupported backends keep native rendering |
-| FSR sharpening | `temporal_sharpness` | `0.0` to `1.0` (default `0.2`) | RCAS sharpening after temporal reconstruction; zero disables sharpening |
+| Temporal upscaling | `temporal_quality` | `off`, `native-aa`, `quality` (default), `balanced`, `performance` | Enhanced Vulkan only, with compatible probe data. Reconstructs the world before the full-resolution HUD, with Arm ASR on a Snapdragon (Qualcomm) GPU and AMD FSR 3.1 elsewhere (`OPENRAC_TEMPORAL_UPSCALER`); no frame generation. Quality uses a 1.5x display-to-render ratio, Balanced 1.7x and Performance 2x. Native AA uses the existing render resolution. Active FSR replaces MSAA while preserving its saved setting. Requires a build with `OPENRAC_FSR3`; unsupported backends keep native rendering |
+| Upscaling sharpening | `temporal_sharpness` | `0.0` to `1.0` (default `0.2`) | RCAS sharpening after temporal reconstruction; zero disables sharpening |
 | Probe spheres | `probe_spheres` | `0` (default), `1` | Enhanced Settings window placement overlay: cyan sparse, green dense, gold relocated, magenta invalid. Spheres follow camera/region selection and CPU-region fades; lighting blends up to three local regions per fragment |
 | Medial axis | `medial_axis_debug` | `0` (default), `1` | Enhanced > Diagnostics: green centre paths, pink junctions and white component centres from the bake |
 | Environment probes | `environment_probe_debug` | `0` (default), `1` | Enhanced > Diagnostics: mirror spheres show each capture; cyan reflection bounds and faint hidden wire markers show coverage |
 | Modern shadows | `enhanced_shadows` | `1` (default), `0` | Independently toggles sun cascades and Ratchet's shadow map in the Enhanced Settings window. Off restores original stencil shadows while keeping GI and GTAO preferences |
+| Volumetrics | `volumetric_quality` | `off` (default), `low`, `medium`, `high` | Experimental, available in the in-game enhanced developer panel only. Sample grid density: Low uses 64-pixel columns/24 depth slices, Medium 32/48, High 16/96. Off retains original fog. Applies immediately; fog thickness stays unchanged |
 | Shadow quality | `shadow_quality` | `high` (default), `medium`, `low` | High uses 2048x2048 for the nearest sun cascade, 1024x1024 for the other cascades and 512x512 for Ratchet. Medium halves the sun map dimensions but keeps Ratchet at 512x512. Low quarters the sun map dimensions and uses 256x256 for Ratchet. Changes apply immediately, including the scrolling shadow cache |
 | Probe normal bias | `probe_normal_bias` | `0.0` to `2.0` world units (default `0.5`) | Offsets the GI visibility receiver along the camera-facing surface normal; updates immediately |
 | Probe view bias | `probe_view_bias` | `0.0` to `2.0` world units (default `0.5`) | Offsets the GI visibility receiver toward the camera; updates immediately |
@@ -87,7 +88,9 @@ The legacy `probe_lighting` key is accepted but ignored and is omitted when savi
 | Frame counter (F2) | `show_fps` | `0` (off), `1` (FPS and whole-frame time), `2` (FPS, CPU and GPU milliseconds) | F2 cycles all three modes. Whole-frame time measures completed presentation intervals, including swap and pacing waits, and agrees with FPS. CPU uses those same intervals with swap-call time removed: all intervening simulation ticks, preparation, rendering and other waits count, even when rendering is skipped. This is elapsed CPU-side time, not processor utilisation. GPU remains the sum of asynchronously measured passes; missing samples show `--`. Updates four times a second |
 | Low-latency frames | `low_latency_frames` | `0` (default), `1` | Draws the frames between game ticks sooner and keeps fewer finished frames waiting for the display, so the picture reacts faster. Only the timing of the picture changes, never the game's ticks. On OpenGL it can cost frames on a slow graphics card. Off by default. Drawer: Latency; the game's Video options page |
 | Responsive controls | `responsive_controls` | `0` (default), `1` | Reads the pads again just before each tick, so a press reaches the game up to a tick sooner. Also turns the camera in the frames between ticks with the right stick as it is now, so a turn shows at once (see "The camera between ticks"; not at the `original` frame rate). The game's logic is unchanged, but a trick timed by feel lands about a frame earlier, so it is off by default. Replaces Responsive pad (`fresh_input`) and Responsive camera (`camera_latch`); those keys are ignored, so it starts off. Drawer: Latency; the game's Video options page |
-| (Alt) | `menu_bar` | `1`, `0` | The menus along the window's top on Windows and Linux (macOS has them in its own menu bar) |
+| (`` ` ``) | `menu_bar` | `1`, `0` | The menus along the window's top on Windows and Linux (macOS has them in its own menu bar) |
+| (Controller bindings, Menu bar) | `menu_bar_key` | `` ` ``, `Alt`, any SDL scancode name (`F4`, `M`) | The key that hides and shows those menus, by its place on the keyboard (`` ` `` is the key under Escape on any layout); the bar says it at its right. `Alt` counts pressed by itself (Alt+Return stays fullscreen; an Alt held through Alt+Tab does not count) |
+| (Controller bindings, Menu bar) | `menu_bar_button` | `paddle1`, `none`, any SDL gamepad button name (`misc1`, `back`) | The controller button that hides and shows them, while the game's window has the focus. `paddle1` is R4, the Steam Controller's upper right back button (the 2015 one's right grip). Not "..." by default: a running Steam opens its own panel on it |
 | Mute in background | `mute_unfocused` | `0`, `1` | Silence while another window has the keyboard |
 | Game fixes: one row each | `fix_...` | `1` (the port's fix), `0` (the console's behaviour) | What the port changes from the console that a player may switch back (section 8). Ratchet & Clank: `fix_wide_moby_effects`, `fix_wide_nanotech_orbs`, `fix_wide_liquids` |
 | (F9, F10) | `volume` | `100`, `0` to `100` | How loud everything the port plays is |
@@ -438,7 +441,7 @@ follows ReRAC's idea and says so in
 
 The strafe of the later games (Going Commando's Hold L2-R2, Up Your
 Arsenal's lock-strafe), which was a row of this page until 2026-10-21, is
-a mod now: **lock-strafe**, in [OpenRAC/rac1-mods](https://github.com/OpenRAC/rac1-mods),
+a mod now: **lock-strafe**, in [OpenRAC/openrac-mods](https://github.com/OpenRAC/openrac-mods),
 installed and switched in the launcher's Mods tab, with its mode (Lock with
 weapons, or Hold L2-R2) among its settings ([MODS.md](MODS.md)). Its
 README says what each mode does, how it is built from the game's own strafe
@@ -536,14 +539,21 @@ Motion Blur tuning is saved with the graphics settings:
 
 | Key | Range | Default |
 |---|---|---|
-| `motion_blur_radius` | 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“128 display pixels | 128 |
-| `motion_blur_samples` | 8ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“64 | 32 |
-| `motion_blur_min_motion` | 0.1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“4 display pixels | 0.5 |
-| `motion_blur_spread` | 0ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“1 | 0.5 |
-| `motion_blur_depth_tolerance` | 0.001ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“0.05 | 0.009 |
-| `motion_blur_cutscene_multiplier` | 0ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“2 | 1 |
+| `motion_blur_radius` | 1 to 128 display pixels | 64 |
+| `motion_blur_samples` | 8 to 64 | 16 |
+| `motion_blur_min_motion` | 0.1 to 4 display pixels | 1 |
+| `motion_blur_spread` | 0 to 1 | 0.5 |
+| `motion_blur_depth_tolerance` | 0.001 to 0.05 | 0.009 |
+| `motion_blur_cutscene_multiplier` | 0 to 2 | 1 |
 
-Longer trails and more samples increase GPU cost. Minimum motion suppresses tiny
+The default preset keeps strength 0.5, with 16 samples, a 64-pixel trail cap and a
+1-pixel motion threshold. It preserves prominent motion while avoiding subpixel blur
+and the cost of very long trails. Existing saved custom values remain in effect;
+Reset blur tuning applies the new defaults.
+
+Longer trails and more samples increase GPU cost. The sample count is a ceiling: a trail
+takes two samples a display pixel of its length, at least 8 (`motion-blur-adaptive-samples`
+in docs/port/RENDER_PERF.md). Minimum motion suppresses tiny
 movements; trail spread controls JFA's sideways reach; depth tolerance controls
 colour gathering across depth differences. A zero cutscene multiplier disables
 cutscene blur. Reset blur tuning restores these defaults and strength 0.5 while

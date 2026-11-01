@@ -55,6 +55,16 @@ bool SDLCALL on_event(void*, SDL_Event* event) {
     return true;
 }
 
+// Whether the vendor's GPUs draw in tiles (tile_based()): Arm, Qualcomm, Apple and Imagination.
+// OPENRAC_TILE_BASED decides instead when it is set: 1 for yes, anything else for no.
+bool guess_tile_based(std::uint32_t vendor) {
+    if (const auto chosen = env::value(env::Var::TileBased)) {
+        return *chosen == "1";
+    }
+    constexpr std::array<std::uint32_t, 4> kTiled = {0x13B5, 0x5143, 0x106B, 0x1010};
+    return std::find(kTiled.begin(), kTiled.end(), vendor) != kTiled.end();
+}
+
 bool open(const Config& config, std::string& error) {
     if (g != nullptr) {
         error = "a Vulkan context is open already";
@@ -104,6 +114,8 @@ bool open(const Config& config, std::string& error) {
         return false;
     }
     describe_device();
+    g->tile_based = guess_tile_based(g->properties.vendorID);
+    g->split_pass_timing = env::flag(env::Var::GpuPassTiming);
     if (g->timestamp_bits) {
         stats::set_gpu_hooks({timing_begin, timing_end, nullptr});
     }
@@ -152,6 +164,17 @@ bool gpu_driven_active() {
     return !off && gpu_make_engine();
 }
 
+// Returns the identity a reusable visibility batch must belong to, opening a recording if needed.
+std::uint64_t gpu_instance_recording() {
+    // CPU rendering has no reusable GPU instance batches.
+    if (!gpu_driven_active()) {
+        return 0;
+    }
+
+    prepare_frame();
+    return g->recording;
+}
+
 bool indexed_viewports_supported(unsigned count) {
     return active() && g->viewport_index_supported && count > 0
            && count <= g->properties.limits.maxViewports && material_enabled();
@@ -184,6 +207,12 @@ renderer::GpuInstanceBatch gpu_instances(
 
 bool draw_gpu_instances(renderer::GpuInstanceBatch batch, unsigned first, unsigned count) {
     return active() && gpu_submit_draw(batch, first, count);
+}
+
+bool draw_gpu_instance_ranges(
+    renderer::GpuInstanceBatch batch, std::span<const renderer::GpuIndexRange> ranges
+) {
+    return active() && gpu_submit_ranges(batch, ranges);
 }
 
 bool draw_indexed_indirect(unsigned arguments, unsigned index_count) {
@@ -242,6 +271,14 @@ GpuMaterialCounters gpu_material_counters() {
 void report_measures() {
     const auto& current = g->submission;
     const auto& previous = g->reported_submission;
+    stats::gauge(
+        "vk_buffer_zero_fill_bytes",
+        double(current.buffer_zero_fill_bytes - previous.buffer_zero_fill_bytes)
+    );
+    stats::gauge(
+        "vk_buffer_mirror_restore_bytes",
+        double(current.buffer_mirror_restore_bytes - previous.buffer_mirror_restore_bytes)
+    );
     stats::gauge("vk_uniform_uploads", double(current.uniform_uploads - previous.uniform_uploads));
     stats::gauge(
         "vk_uniform_upload_kb",
@@ -429,6 +466,18 @@ const std::string& api_version() {
 
 bool software() {
     return g != nullptr && g->software;
+}
+
+bool tile_based() {
+    return g != nullptr && g->tile_based;
+}
+
+std::uint32_t vendor_id() {
+    return g != nullptr ? g->properties.vendorID : 0;
+}
+
+bool split_pass_timing() {
+    return g != nullptr && g->split_pass_timing;
 }
 
 }  // namespace openrac::vkgl

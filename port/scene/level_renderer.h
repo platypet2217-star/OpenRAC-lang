@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "renderer/framebuffer.h"
@@ -45,6 +46,8 @@ public:
     std::string deformation_vertex(std::string source) const;
     // Reports actual resource-backed deformation, not merely a model's eligibility.
     bool deformation_active() const;
+    // Authored anchors of water attachments, shared by every deformation pass.
+    void floating_anchors(std::vector<std::pair<renderer::Vec3, std::uint64_t>>& anchors) const;
 
     // Upload a level; the GL context must be current.
     bool upload(const LevelData& level, renderer::TexturePool& textures, std::string& error);
@@ -156,6 +159,15 @@ public:
         }
     }
 
+    // The settings sweep's experiments (debug/capture.cpp): the blended passes of every layer
+    // (static translucent texels, the mobys' translucent pass) left out, drawn without probe
+    // light, or drawn with the full (not the cheaper) probe light.
+    void set_sweep_translucent(bool off, bool unlit, bool full) {
+        m_sweep_translucent_off = off;
+        m_sweep_translucent_unlit = unlit;
+        m_sweep_translucent_full = full;
+    }
+
     // Controls the GI-coloured edge light on essential gameplay objects.
     void set_gameplay_rim(bool enabled, float strength, float falloff) {
         m_gameplay_rim = {enabled ? strength : 0.0f, falloff};
@@ -248,6 +260,8 @@ public:
     // The light bank the mobys are lit from this frame (16 sets of 16 floats, as the game holds
     // it); until set, the level's exported sets.
     // Shared lighting for optional world materials outside the mesh renderer.
+    std::string atmosphere_source() const;
+    void bind_atmosphere(const renderer::Shader&) const;
     void bind_surface_lighting(
         const renderer::Shader& shader, const renderer::Camera& camera
     ) const;
@@ -261,10 +275,10 @@ public:
 private:
     // One consecutive run of compatible motion instances, preserving draw order.
     struct MotionBatch {
-        std::uint32_t model = 0;  // Shared geometry and material runs.
-        unsigned group = 0;       // Current moby geometry VAO.
-        int first = 0;            // First nine-texel pose record.
-        int count = 0;            // Instances submitted together.
+        std::uint32_t model = 0;       // Shared geometry and material runs.
+        unsigned group = 0;            // Current moby geometry VAO.
+        int first = 0;                 // First nine-texel pose record.
+        int count = 0;                 // Instances submitted together.
         bool floats_on_water = false;  // Shared deformation selection for this batch.
     };
 
@@ -323,9 +337,11 @@ private:
         bool bounded = false;
         renderer::Vec3 low{}, high{};
         std::vector<InstanceData> cpu_instances;
+        std::vector<std::uint64_t> floating_ids;  // CPU only, independent of GPU instance layout.
         std::vector<CasterBounds> caster_bounds;
         std::vector<renderer::GpuCullBounds> gpu_bounds;
         renderer::GpuInstanceBatch gpu_camera, gpu_pvs;
+        std::vector<CasterBounds> shadow_geometry_bounds;
         std::vector<std::uint16_t> occlusion;
         unsigned pvs_vao = 0, pvs_instances = 0;
         int pvs_count = 0;
@@ -435,6 +451,9 @@ private:
     std::vector<std::vector<bool>> m_shadow_solid_primitives;
     // Both solid-shader eligibility modes, rebuilt with geometry/materials on level upload.
     std::vector<std::array<std::vector<ShadowDrawRange>, 2>> m_static_shadow_ranges;
+    std::vector<std::vector<ShadowGeometryRange>> m_shadow_geometry;
+    std::vector<std::uint8_t> m_prepass_coverage;  // Static solid/cutout material passes per model.
+    std::array<std::uint64_t, 2> m_shadow_geometry_indices{};  // Tested and rejected indices.
     std::vector<std::uint8_t>
         m_static_shadow_coverage;  // Alpha-tested (1) and permanent opaque (2).
 
@@ -443,6 +462,17 @@ private:
     std::array<CascadeCulling, kSunCascades> m_sun_culling{};
     std::vector<InstanceData> m_camera_survivors;
     Pvs m_pvs;
+
+    // The view inputs whose GPU batches can be reused within one recording.
+    struct CameraVisibility {
+        renderer::Mat4 clip{};
+        Pvs::Mask mask{};
+        std::uint64_t recording = 0;
+        bool culling_off = false;
+    };
+
+    // Instance updates invalidate their layer; a new recording or view rebuilds its batches.
+    std::array<CameraVisibility, kLayerCount> m_camera_visibility{};
     std::vector<InstanceData> m_pvs_survivors;
 
     struct PvsModel {
@@ -474,6 +504,7 @@ private:
     struct InstanceGroup {
         std::uint32_t key = 0;
         std::vector<InstanceData> instances;
+        std::vector<std::uint64_t> floating_ids;
         std::vector<std::array<float, 4>> spheres;  // CPU only: no extra GPU instance attributes
         std::vector<std::uint16_t> occlusion;
     };
@@ -502,6 +533,9 @@ private:
     unsigned m_lights = 0;            // RGBA8 texture, the ties' lit colours
     std::vector<float> m_light_sets;  // the level's 16 directional light sets (LevelData)
     std::array<float, 64> m_point_lights{};
+    bool m_sweep_translucent_off = false;
+    bool m_sweep_translucent_unlit = false;
+    bool m_sweep_translucent_full = false;
     std::array<float, 2> m_gameplay_rim{0.30f, 6.46f};
     std::array<float, 2> m_gameplay_rim_lift{0.09f, 7.1f};
     std::unique_ptr<LevelLighting> m_lighting;  // The probe and early lighting; null: none.
@@ -514,18 +548,24 @@ private:
     std::vector<JointColumns> m_palette_data;
     renderer::Shader m_mesh;
     renderer::Shader m_early_mesh, m_early_solid;
-    renderer::Shader m_colour_opaque, m_early_colour_opaque, m_static_translucent;
+    renderer::Shader m_colour_opaque, m_early_colour_opaque, m_static_translucent,
+        m_static_translucent_full;
     // Static solid, static alpha-tested, then opaque mobys (optional skinning).
     std::array<renderer::Shader, 3> m_colour_specialised, m_early_colour_specialised;
     // mesh.frag's opaque path alone, without discard (the static layers' opaque pass; draw_layer).
     renderer::Shader m_solid;
     renderer::Shader m_depth, m_depth_solid;
+    std::array<renderer::Shader, 2> m_rigid_depth, m_rigid_surface_depth;
+    bool make_rigid_depth_programs(std::string& error);
+    void release_rigid_depth_programs();
     renderer::Shader m_surface_depth;        // Smooth-normal prepass with alpha testing.
     renderer::Shader m_surface_depth_solid;  // Smooth-normal prepass for opaque static geometry.
     renderer::Shader m_sky;
     std::unique_ptr<renderer::FrameBuffer> m_hero_map;
     renderer::Shader m_hero_depth, m_shadow_solid;
     renderer::Shader m_atlas_depth, m_atlas_solid;
+    std::array<renderer::Shader, 2> m_dry_shadow, m_dry_atlas;
+    bool make_dry_shadow_programs(bool atlas, std::string& error);
     std::unique_ptr<renderer::FrameBuffer> m_shadow_atlas;
     bool m_shadow_atlas_active = false;
     ShadowAtlasLayout m_shadow_layout;
@@ -559,6 +599,7 @@ private:
     };
 
     std::array<std::vector<ShadowDraw>, 3> m_shadow_draws;
+    std::vector<renderer::GpuIndexRange> m_shadow_ranges;
     renderer::Mat4 m_hero_matrix = renderer::identity();
     std::optional<renderer::Vec3> m_hero_centre;
     std::optional<Instance> m_wetness_hero;
