@@ -4,6 +4,7 @@
 // players: short, plain, one idea per line; the longer "why" goes in a tooltip.
 // Plain constants, maps from a state to its words, and small functions where a name or a number goes
 // into a sentence: no decision is made here, only wording.
+import { i18n } from '../lib/i18n/i18n';
 
 export type ModTone = "ok" | "off" | "warn" | "err";
 
@@ -48,47 +49,46 @@ export const COMPATIBLE_LABEL = {
 /** The Mods tab's game list (Mods.svelte, modState). */
 export const GAME_LIST = {
   gameplayMods: "Gameplay mods",
-  notModdable: "Not moddable yet",
+  notModdable: i18n.t.modsText?.notSetUp,
   early: "Early access",
   working: "Working…",
-  setUp: "Set it up first",
+  setUp: i18n.t.modsText?.setUp,
   ready: "Ready to mod",
 } as const;
 
 /** The page around the panels (Mods.svelte). */
 export const PAGE = {
-  lead: "Add mods, switch them on, and play.",
+  lead: i18n.t.modsText?.modsDesc,
   tabsLabel: "Mods",
-  tabMine: "My mods",
-  tabEditor: "Level editor",
-  tabAssets: "Models and textures",
-  earlyTitle: "Early access",
-  earlyLine:
-    "Its levels open in Godot and you can make texture and model packs. Packing level edits and playing come later.",
-  noneTitle: "No mods for this game yet",
-  noneLine: "Mods arrive once the level editor can read its levels.",
-  noneLink: "Follow the progress on openrac.dev",
-  makeOwn: "Want to make your own?",
-  makeOwnButton: "Edit a level in Godot",
+  tabMine: i18n.t.modsText?.pageMyMods,
+  tabEditor: i18n.t.modsText?.pageEditor,
+  tabAssets: i18n.t.modsText?.pageAssets,
+  earlyTitle: i18n.t.modsText?.earlyTitle,
+  earlyLine: i18n.t.modsText?.earlyLine,
+  noneTitle: i18n.t.modsText?.noneTitle,
+  noneLine: i18n.t.modsText?.noneLine,
+  noneLink: i18n.t.player?.followProgress,
+  makeOwn: i18n.t.modsText?.makeOwn,
+  makeOwnButton: i18n.t.modsText?.makeOwnButton,
   developerTitle: "For developers",
 } as const;
 
 /** Adding a mod: a link, a file or a folder (AddMod.svelte). */
 export const ADD = {
-  title: "Add a mod",
+  title: i18n.t.modsText?.addModTitle,
   linkLabel: "A mod's link",
-  linkPlaceholder: "Paste a mod's link, like openrac.dev/mods/lock-strafe",
+  linkPlaceholder: i18n.t.modsText?.linkPlaceholder,
   notModPage: "That page isn't a mod. Open a mod's page on openrac.dev and copy its link.",
-  go: "Find",
-  file: "File…",
-  folder: "Folder…",
+  go: i18n.t.modsText?.go,
+  file: i18n.t.modsText?.file,
+  folder: i18n.t.modsText?.folder,
   pickZip: "Choose a mod (.zip)",
   pickFolder: "Choose a mod's folder",
-  drop: "or drop a .zip or folder on this page",
+  drop: i18n.t.modsText?.drop,
   dropHere: "Drop to add it",
-  browse: "Browse mods",
+  browse: i18n.t.modsText?.browseMods,
   modsUrl: "https://openrac.dev/mods",
-  publish: "Publish your mod",
+  publish: i18n.t.modsText?.publishMod,
   publishUrl: "https://openrac.dev/mods/submit",
   close: "Close",
 } as const;
@@ -224,9 +224,9 @@ export const alsoBound = (names: string[]) =>
 
 /** The packs' list (PacksPanel.svelte). */
 export const PACKS = {
-  title: "Textures, models and levels",
-  sub: "Change how the game looks",
-  empty: "None yet. Add one above, or make your own in the Level editor or Models and textures.",
+  title: i18n.t.modsText?.packsTitle,
+  sub: i18n.t.modsText?.packsSub,
+  empty: i18n.t.modsText?.packsEmpty,
   orderHint: "Lower in the list wins",
   moveUpTitle: "Move up: the packs under it win where they change the same thing",
   moveDownTitle: "Move down: it wins over the packs above it",
@@ -540,7 +540,7 @@ export const revokedOffText = (name: string, version: string, reason: string) =>
   `${name} ${version} was turned off: ${reason}`;
 
 export const BROWSE = {
-  tabTitle: "Browse",
+  tabTitle: i18n.t.modsText?.pageBrowse,
   search: "Search mods",
   searchHint: "/",
   presetsLabel: "Show",

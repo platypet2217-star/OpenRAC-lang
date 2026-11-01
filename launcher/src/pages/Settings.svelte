@@ -301,8 +301,8 @@
         {/if}
         {#if !onAndroid}
           <PathField
-            label="Install folder"
-            hint="Where your games are set up from your discs. A few GB per game."
+            label={i18n.t.settings?.gamesFolderLabel}
+            hint={i18n.t.settings?.gamesFolderDesc}
             folder
             bind:value={draft.installDir}
             check={installFolder}
@@ -341,13 +341,13 @@
       >
     </div>
   {:else}
-    <h1>Settings</h1>
+    <h1>{i18n.t.settings?.settingsTitle}</h1>
 
     <!-- Android has no folders to choose: the app keeps its files in one place, which the Files app
          shows (FilesProvider.kt, "Your files" below), and its picker copies discs there. -->
     {#if !onAndroid}
       <section class="panel">
-        <h2>Your games</h2>
+        <h2>{i18n.t.settings?.yourGamesTitle}</h2>
         {#if rootHere}
           <PathField
             label="OpenRAC folder"
@@ -366,16 +366,16 @@
           {/if}
         {/if}
         <PathField
-          label="Games folder"
-          hint="The folder with your PlayStation 2 disc images (.iso). OpenRAC finds its games in it."
+          label={i18n.t.settings?.gamesFolderLabel}
+          hint={i18n.t.settings?.gamesFolderDesc}
           folder
           bind:value={draft.discsDir}
           detail={draft.developer}
           check={gamesFolder}
         />
         <PathField
-          label="Install folder"
-          hint="Where your games are set up from your discs. A few GB per game."
+          label={i18n.t.settings?.installFolderLabel}
+          hint={i18n.t.settings?.installFolderDesc}
           folder
           bind:value={draft.installDir}
           detail={draft.developer}
@@ -400,11 +400,11 @@
     {/if}
 
     <section class="panel">
-      <h2>General</h2>
+      <h2>{i18n.t.settings?.generalTitle}</h2>
       <div class="setting theme">
         <span class="text">
-          <strong id="theme-label">Theme</strong>
-          <small>The launcher's colours. Its accent is the game's.</small>
+          <strong id="theme-label">{i18n.t.settings?.themeLabel}</strong>
+          <small>{i18n.t.settings?.themeDesc}</small>
         </span>
         <div class="themes" role="radiogroup" aria-labelledby="theme-label" use:tablist>
           {#each PALETTES as p (p.id)}
@@ -428,8 +428,8 @@
       {#if !onAndroid}
         <label class="setting">
           <span class="text">
-            <strong>Compact layout</strong>
-            <small>A game's name and its Play button side by side.</small>
+            <strong>{i18n.t.settings?.compactLayoutLabel}</strong>
+            <small>{i18n.t.settings?.compactLayoutDesc}</small>
           </span>
           <input
             type="checkbox"
@@ -441,8 +441,8 @@
         </label>
         <label class="setting">
           <span class="text">
-            <strong>Show in Discord</strong>
-            <small>Your status says when you are playing.</small>
+            <strong>{i18n.t.settings?.discordRpcLabel}</strong>
+            <small>{i18n.t.settings?.discordRpcDesc}</small>
           </span>
           <input type="checkbox" role="switch" class="switch" bind:checked={draft.discordRpc} />
         </label>
@@ -470,7 +470,7 @@
       {/if}
       <!-- The name online mods show the other players; the game gets it as OPENRAC_PLAYER_NAME. -->
       <div class="field">
-        <label for="multiplayer-name">Multiplayer name</label>
+        <label for="multiplayer-name">{i18n.t.settings?.multiplayerNameLabel}</label>
         <input
           id="multiplayer-name"
           type="text"
@@ -483,7 +483,7 @@
           bind:value={draft.multiplayerName}
         />
         <p id="multiplayer-name-note" class="dim note">
-          {nameError ?? "What other players see in online mods. 3 to 16 letters, digits and underscores."}
+          {nameError ?? i18n.t.settings?.multiplayerNameDesc}
         </p>
       </div>
     </section>

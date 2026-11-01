@@ -19,14 +19,13 @@ const GROUPS: { kind: DifferenceKind; title: string; about: string }[] = [
   },
   {
     kind: "guard",
-    title: "Kept from crashing",
-    about:
-      "Where a PlayStation 2 carried on unnoticed but a PC would crash. Always on: off would only bring the crash back.",
+    title: i18n.t.differences?.differenceGuardTitle,
+    about: i18n.t.differences?.differenceGuardDesc,
   },
   {
     kind: "port",
-    title: "Playing on a PC",
-    about: "What comes with the game being a PC program.",
+    title: i18n.t.differences?.differencePortTitle,
+    about: i18n.t.differences?.differencePortDesc,
   },
 ];
 
