@@ -22,6 +22,12 @@
     "savesDesc": "Your saves show here once you have played and saved.",
     "openFolder": "Open folder"
   },
+  "differences": {
+    "differencesTitle": "Differences from the original",
+    "differencesDesc": "What this PC version does otherwise than the PlayStation 2 game, and why.",
+    "differenceGameFixesTitle": "Game fixes",
+    "differenceGameFixesDesc": "On, the port's fix; off, the game plays as on a PlayStation 2. The game's Options menu has the same switches."
+  },
   "settings": {
     "languageLabel": "Language",
     "languageDesc": "Choose the language of the app."

@@ -22,6 +22,12 @@
         "savesDesc": "Tus partidas guardadas aparecerán aquí una vez que hayas jugado y guardado.",
         "openFolder": "Abrir carpeta"
     },
+    "differences": {
+        "differencesTitle": "Diferencias con el original",
+        "differencesDesc": "Qué hace esta versión para PC que no hace el juego de PlayStation 2, y por qué.",
+        "differenceGameFixesTitle": "Correcciones del juego",
+        "differenceGameFixesDesc": "Activado, la corrección del port; desactivado, el juego se juega como en una PlayStation 2. El menú de Opciones del juego los incluye."
+    },
     "settings": {
         "languageLabel": "Idioma",
         "languageDesc": "Elige el idioma de la aplicación."

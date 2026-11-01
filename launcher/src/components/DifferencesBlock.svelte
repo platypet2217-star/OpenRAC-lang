@@ -13,6 +13,7 @@
   import { arrive, fold } from "$lib/motion";
   import { isPlaying } from "$lib/player.svelte";
   import { fly, slide } from "svelte/transition";
+  import { i18n } from '../lib/i18n/i18n';
 
   let { version, foldable = false }: { version: VersionView; foldable?: boolean } = $props();
   let unfolded = $state(false);
@@ -68,7 +69,7 @@
       />
     {:else}
       <div class="row top">
-        <h2 id="differences-title" class="grow">Differences from the original</h2>
+        <h2 id="differences-title" class="grow">{i18n.t.differences?.differencesTitle}</h2>
         {#if developer}<span class="chip mono" title="The game's settings file">{data.settingsFile}</span>{/if}
       </div>
     {/if}
@@ -76,7 +77,7 @@
       <div id="differences-list" class="list" transition:slide={fold}>
         {#if foldable && developer}<span class="chip mono" title="The game's settings file">{data.settingsFile}</span
           >{/if}
-        <p class="muted">What this PC version does otherwise than the PlayStation 2 game, and why.</p>
+        <p class="muted">{i18n.t.differences?.differencesDesc}</p>
 
         {#each groups as group (group.kind)}
           <div class="group">

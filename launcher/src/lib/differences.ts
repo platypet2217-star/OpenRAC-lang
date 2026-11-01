@@ -1,6 +1,7 @@
 // A game's differences from the original (core/src/differences.rs), grouped as its page shows
 // them: the fixes a player can switch back first, then the guards, then the PC's own differences.
 import type { DifferenceKind, DifferenceView } from "./api";
+import { i18n } from '../lib/i18n/i18n';
 
 export interface DifferenceGroup {
   kind: DifferenceKind;
@@ -13,9 +14,8 @@ export interface DifferenceGroup {
 const GROUPS: { kind: DifferenceKind; title: string; about: string }[] = [
   {
     kind: "fix",
-    title: "Game fixes",
-    about:
-      "On, the port's fix; off, the game plays as on a PlayStation 2. The game's Options menu has the same switches.",
+    title: i18n.t.differences?.differenceGameFixesTitle,
+    about: i18n.t.differences?.differenceGameFixesDesc,
   },
   {
     kind: "guard",
