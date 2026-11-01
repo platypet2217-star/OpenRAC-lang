@@ -381,22 +381,22 @@
         {#if !portReady}
           <!-- Every game has this page; one without a port yet says so, and how far it is. -->
           <section class="panel coming" aria-labelledby="coming-title" in:fly|global={arrive(90)}>
-            <h2 id="coming-title">Not playable yet</h2>
+            <h2 id="coming-title">{i18n.t.player?.notPlayableYetTitle}</h2>
             <p class="muted">
-              OpenRAC is rebuilding {v.title} so it runs natively on your computer. Play appears here when it is ready{setUp
-                ? "; your disc is already set up for it."
-                : ". You can set your disc up now, so it is ready too."}
+              {i18n.t.player?.notPlayableYetDesc1} {v.title} {i18n.t.player?.notPlayableYetDesc2}{setUp
+                ? i18n.t.player?.playableStatus1
+                : i18n.t.player?.playableStatus2}
             </p>
             {#if v.progress}
               <div class="progress">
-                <span class="grow">Code rebuilt so far</span>
+                <span class="grow">{i18n.t.player?.codeRebuildProgress}</span>
                 <strong><CountUp value={v.progress.percent} format={pct} /></strong>
               </div>
               <ProgressBar percent={v.progress.percent} label={`${v.title}: code rebuilt so far`} />
             {/if}
             <p>
               <button class="link" onclick={() => void guard(api.openUrl(SITE_URL))}
-                >Follow the progress on openrac.dev</button
+                >{i18n.t.player?.followProgress}</button
               >
             </p>
           </section>

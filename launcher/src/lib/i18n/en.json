@@ -15,7 +15,15 @@
     "setUpDiscDesc": "Choose the image (.iso or .chd) of your own disc. OpenRAC never downloads a game.",
     "discSetUp": "Disc set up",
     "gameBuilt": "Game built",
-    "levelsReady": "Levels ready"
+    "levelsReady": "Levels ready",
+    "notPlayedYet": "This game cannot be played yet. You can set your disc up now, ready for when it can.",
+    "notPlayableYetTitle": "Not playable yet",
+    "notPlayableYetDesc1": "OpenRAC is rebuilding ",
+    "notPlayableYetDesc2": " so it runs natively on your computer. Play appears here when it is ready",
+    "playableStatus1": "; your disc is already set up for it.",
+    "playableStatus2": ". You can set your disc up now, so it is ready too.",
+    "codeRebuildProgress": "Code rebuilt so far",
+    "followProgress": "Follow the progress on openrac.dev"
   },
   "saveManager": {
     "saves": "Saves",

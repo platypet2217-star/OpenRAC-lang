@@ -200,7 +200,7 @@ export function playerState(game: GameView, v: VersionView): PlayerState {
       label: found ? i18n.t.player?.setUp : i18n.t.player?.setUpDisc,
       icon: "disc",
       hint: planned
-        ? "This game cannot be played yet. You can set your disc up now, ready for when it can."
+        ? i18n.t.player?.notPlayedYet
         : found
           ? `Found in your games folder: ${fileName(found.path)}`
           : i18n.t.player?.setUpDiscDesc,

@@ -15,7 +15,15 @@
         "setUpDiscDesc": "Elige la imagen (.iso o .chd) de tu propio disco. OpenRAC nunca descarga un juego.",
         "discSetUp": "Disco configurado",
         "gameBuilt": "Juego construido",
-        "levelsReady": "Niveles listos"
+        "levelsReady": "Niveles listos",
+        "notPlayedYet": "Este juego aún no puede jugarse. Puedes configurar tu disco ahora y jugar cuando esté listo.",
+        "notPlayableYetTitle": "Aún no es jugable",
+        "notPlayableYetDesc1": "OpenRAC está reconstruyendo ",
+        "notPlayableYetDesc2": " para que funcione de forma nativa en tu ordenador. El juego aparecerá aquí cuando esté listo",
+        "playableStatus1": "; tu disco ya está configurado para ello.",
+        "playableStatus2": ". Puedes configurar tu disco ahora, para que esté listo también.",
+        "codeRebuildProgress": "Código reconstruido hasta ahora",
+        "followProgress": "Sigue el progreso en openrac.dev"
     },
     "saveManager": {
         "saves": "Partidas guardadas",
